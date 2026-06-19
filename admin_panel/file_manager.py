@@ -104,3 +104,111 @@ def cleanup_old_files(days: int = 1) -> dict:
             except OSError:
                 pass
     return {"deleted": deleted, "deleted_size": deleted_size, "deleted_size_human": human_size(deleted_size), "days": days}
+
+def cleanup_old_files_by_hours(hours: int = 6) -> dict:
+    from datetime import datetime, timedelta
+
+    base = safe_base_dir()
+    cutoff = datetime.now() - timedelta(hours=max(0, int(hours)))
+    deleted = 0
+    deleted_size = 0
+
+    for item in list_managed_files(limit=100000):
+        if item.modified_at < cutoff:
+            try:
+                size = item.size
+                item.abs_path.unlink(missing_ok=True)
+                deleted += 1
+                deleted_size += size
+            except Exception:
+                pass
+
+    for p in sorted(base.rglob("*"), reverse=True):
+        if p.is_dir():
+            try:
+                p.rmdir()
+            except OSError:
+                pass
+
+    return {
+        "deleted": deleted,
+        "deleted_size": deleted_size,
+        "deleted_size_human": human_size(deleted_size),
+        "hours": hours,
+    }
+
+
+def enforce_storage_limit(max_storage_mb: int = 500) -> dict:
+    max_bytes = max(1, int(max_storage_mb)) * 1024 * 1024
+    files = list_managed_files(limit=100000)
+    total = sum(f.size for f in files)
+    before = total
+
+    deleted = 0
+    deleted_size = 0
+
+    if total <= max_bytes:
+        return {
+            "deleted": 0,
+            "deleted_size": 0,
+            "deleted_size_human": human_size(0),
+            "before_size": before,
+            "before_size_human": human_size(before),
+            "after_size": total,
+            "after_size_human": human_size(total),
+            "max_storage_mb": max_storage_mb,
+        }
+
+    files.sort(key=lambda f: f.modified_at)
+
+    for item in files:
+        if total <= max_bytes:
+            break
+        try:
+            size = item.size
+            item.abs_path.unlink(missing_ok=True)
+            total -= size
+            deleted += 1
+            deleted_size += size
+        except Exception:
+            pass
+
+    base = safe_base_dir()
+    for p in sorted(base.rglob("*"), reverse=True):
+        if p.is_dir():
+            try:
+                p.rmdir()
+            except OSError:
+                pass
+
+    return {
+        "deleted": deleted,
+        "deleted_size": deleted_size,
+        "deleted_size_human": human_size(deleted_size),
+        "before_size": before,
+        "before_size_human": human_size(before),
+        "after_size": total,
+        "after_size_human": human_size(total),
+        "max_storage_mb": max_storage_mb,
+    }
+
+
+def run_startup_cleanup() -> dict:
+    from app.config import settings
+
+    result = {
+        "enabled": bool(getattr(settings, "auto_cleanup_on_start", True)),
+        "old_cleanup": None,
+        "storage_guard": None,
+    }
+
+    if not result["enabled"]:
+        return result
+
+    hours = int(getattr(settings, "auto_cleanup_older_than_hours", 6))
+    max_mb = int(getattr(settings, "max_storage_mb", 500))
+
+    result["old_cleanup"] = cleanup_old_files_by_hours(hours)
+    result["storage_guard"] = enforce_storage_limit(max_mb)
+
+    return result

@@ -18,6 +18,7 @@ from telegram.ext import (
 load_dotenv()
 
 from admin_panel.web import app as fastapi_app
+from admin_panel.file_manager import run_startup_cleanup
 from app.config import settings
 from app import db
 from app.bot import (
@@ -70,6 +71,13 @@ async def lifespan(app):
 
     db.init_db()
 
+    try:
+        cleanup_result = run_startup_cleanup()
+        print(f"V2.1 startup cleanup: {cleanup_result}")
+    except Exception as exc:
+        print(f"V2.1 startup cleanup warning: {exc}")
+
+
     telegram_app = build_telegram_application()
     await telegram_app.initialize()
     await telegram_app.start()
@@ -87,10 +95,10 @@ async def lifespan(app):
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
         )
-        print("MediaVault Bot V2.0 webhook mode is running.")
+        print("MediaVault Bot V2.1 webhook mode is running.")
         print(f"Webhook URL: {webhook_url}")
     else:
-        print("MediaVault Bot V2.0 local web mode is running.")
+        print("MediaVault Bot V2.1 local web mode is running.")
         print("Webhook was NOT set because PUBLIC_BASE_URL is not HTTPS.")
         print(f"Local panel: {public_base_url}")
         print("For local Telegram bot testing, use: python run.py")
@@ -117,7 +125,7 @@ async def healthz():
     return {
         "status": "ok",
         "mode": "webhook",
-        "version": "2.0",
+        "version": "2.1",
     }
 
 

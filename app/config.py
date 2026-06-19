@@ -27,6 +27,9 @@ class Settings:
     temp_link_expire_hours: int = int(os.getenv("TEMP_LINK_EXPIRE_HOURS", "6"))
     direct_link_timeout: int = int(os.getenv("DIRECT_LINK_TIMEOUT", "120"))
     direct_link_max_mb: int = int(os.getenv("DIRECT_LINK_MAX_MB", os.getenv("MAX_FILE_MB", "45")))
+    auto_cleanup_on_start: bool = os.getenv("AUTO_CLEANUP_ON_START", "True").lower() in {"1", "true", "yes", "on"}
+    auto_cleanup_older_than_hours: int = int(os.getenv("AUTO_CLEANUP_OLDER_THAN_HOURS", "6"))
+    max_storage_mb: int = int(os.getenv("MAX_STORAGE_MB", "500"))
 
     @property
     def max_file_bytes(self) -> int:

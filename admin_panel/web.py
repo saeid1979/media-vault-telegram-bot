@@ -112,7 +112,7 @@ async def download_temp(path: str, expires: int, sig: str):
 
 from admin_panel.file_manager import (
     list_managed_files, storage_summary, human_size as fm_human_size,
-    resolve_file, delete_file, cleanup_old_files, safe_base_dir
+    resolve_file, delete_file, cleanup_old_files, cleanup_old_files_by_hours, enforce_storage_limit, cleanup_old_files_by_hours, enforce_storage_limit, safe_base_dir
 )
 
 def _v2_admin_token_ok(token: str | None) -> bool:
@@ -155,3 +155,16 @@ async def files_cleanup(token: str = Form(""), days: int = Form(1)):
     result = cleanup_old_files(days=days)
     msg = urllib.parse.quote(f"پاک‌سازی انجام شد: {result['deleted']} فایل، {result['deleted_size_human']}")
     return RedirectResponse(url=f"/files?token={urllib.parse.quote(token)}&message={msg}", status_code=303)
+
+@app.post("/files/enforce-storage")
+async def files_enforce_storage(token: str = Form(""), max_mb: int = Form(500)):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+    result = enforce_storage_limit(max_mb)
+    msg = urllib.parse.quote(
+        f"Storage Guard انجام شد: {result['deleted']} فایل حذف شد، {result['deleted_size_human']} آزاد شد"
+    )
+    return RedirectResponse(
+        url=f"/files?token={urllib.parse.quote(token)}&message={msg}",
+        status_code=303,
+    )
