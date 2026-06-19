@@ -27,6 +27,7 @@ class Settings:
     temp_link_expire_hours: int = int(os.getenv("TEMP_LINK_EXPIRE_HOURS", "6"))
     direct_link_timeout: int = int(os.getenv("DIRECT_LINK_TIMEOUT", "120"))
     direct_link_max_mb: int = int(os.getenv("DIRECT_LINK_MAX_MB", os.getenv("MAX_FILE_MB", "45")))
+    telegram_upload_max_mb: int = int(os.getenv("TELEGRAM_UPLOAD_MAX_MB", os.getenv("MAX_FILE_MB", "45")))
 
     @property
     def max_file_bytes(self) -> int:

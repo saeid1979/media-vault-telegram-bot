@@ -20,6 +20,7 @@ load_dotenv()
 from admin_panel.web import app as fastapi_app
 from app.config import settings
 from app import db
+from app.upload_handler import handle_media_upload
 from app.bot import (
     start,
     help_cmd,
@@ -44,6 +45,7 @@ def build_telegram_application() -> Application:
     app.add_handler(CommandHandler('history', history_cmd))
     app.add_handler(CommandHandler('limits', limits_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler((filters.VIDEO | filters.AUDIO | filters.Document.ALL), handle_media_upload))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     return app
 
@@ -69,7 +71,7 @@ async def lifespan(app):
         drop_pending_updates=True,
     )
 
-    print('MediaVault Bot V1.8 webhook is running.')
+    print('MediaVault Bot V1.9 webhook is running.')
     print(f'Webhook URL: {webhook_url}')
 
     try:
