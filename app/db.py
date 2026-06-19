@@ -268,8 +268,8 @@ def ensure_user(user_id: int, username: str | None = None, first_name: str | Non
         if row is None:
             conn.execute(
                 """
-                INSERT INTO bot_users (user_id, username, first_name, last_name, role, is_blocked, daily_limit)
-                VALUES (?, ?, ?, ?, 'normal', 0, NULL)
+                INSERT INTO bot_users (user_id, username, first_name, last_name, role, is_blocked, daily_limit, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'normal', 0, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (user_id, username, first_name, last_name),
             )
@@ -338,8 +338,8 @@ def update_user_control(user_id: int, role: str | None = None, is_blocked: int |
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO bot_users (user_id, role, is_blocked, daily_limit)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO bot_users (user_id, role, is_blocked, daily_limit, created_at, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(user_id) DO UPDATE SET
                 role = excluded.role,
                 is_blocked = excluded.is_blocked,
