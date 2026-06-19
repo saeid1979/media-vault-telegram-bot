@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: media-vault-webhook
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python render_webhook_start.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: PUBLIC_BASE_URL
+        value: https://YOUR-SERVICE-NAME.onrender.com
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: TEMP_LINK_SECRET
+        sync: false
+      - key: TEMP_LINK_EXPIRE_HOURS
+        value: "6"
+      - key: MAX_FILE_MB
+        value: "45"
+      - key: DAILY_LIMIT
+        value: "10"
+      - key: AUTO_DELETE_HOURS
+        value: "6"
+      - key: AUTO_COMPRESS
+        value: "True"
+      - key: VIDEO_MAX_HEIGHT
+        value: "720"
+      - key: VIDEO_CRF
+        value: "28"
+      - key: AUDIO_BITRATE
+        value: "128k"
+      - key: MAX_CONCURRENT_DOWNLOADS
+        value: "1"
+      - key: DOWNLOAD_DIR
+        value: storage/downloads
+      - key: DATABASE_PATH
+        value: storage/media_vault.sqlite3
