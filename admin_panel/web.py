@@ -1,3 +1,4 @@
+import urllib.parse
 from __future__ import annotations
 
 import os
@@ -108,3 +109,49 @@ async def download_temp(path: str, expires: int, sig: str):
     except Exception as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return FileResponse(path=str(file_path), filename=file_path.name, media_type='application/octet-stream')
+
+from admin_panel.file_manager import (
+    list_managed_files, storage_summary, human_size as fm_human_size,
+    resolve_file, delete_file, cleanup_old_files, safe_base_dir
+)
+
+def _v2_admin_token_ok(token: str | None) -> bool:
+    import os
+    expected = os.getenv("ADMIN_TOKEN", "change-this-long-secret")
+    return bool(token) and token == expected
+
+def _v2_forbidden():
+    from fastapi import HTTPException
+    raise HTTPException(status_code=403, detail="Forbidden")
+
+@app.get("/files")
+async def files_page(request: Request, token: str = "", message: str = ""):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+    items = []
+    for f in list_managed_files():
+        items.append({"name": f.name, "rel_path": f.rel_path, "rel_path_url": urllib.parse.quote(f.rel_path), "size_human": fm_human_size(f.size), "modified_at_text": f.modified_at.strftime("%Y-%m-%d %H:%M"), "extension": f.extension})
+    return templates.TemplateResponse("files.html", {"request": request, "token": token, "files": items, "summary": storage_summary(), "download_dir": str(safe_base_dir()), "message": message})
+
+@app.get("/files/download")
+async def files_download(token: str = "", path: str = ""):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+    target = resolve_file(path)
+    return FileResponse(str(target), filename=target.name, media_type="application/octet-stream")
+
+@app.post("/files/delete")
+async def files_delete(token: str = Form(""), path: str = Form("")):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+    deleted = delete_file(path)
+    msg = urllib.parse.quote(f"فایل حذف شد: {deleted.name}")
+    return RedirectResponse(url=f"/files?token={urllib.parse.quote(token)}&message={msg}", status_code=303)
+
+@app.post("/files/cleanup")
+async def files_cleanup(token: str = Form(""), days: int = Form(1)):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+    result = cleanup_old_files(days=days)
+    msg = urllib.parse.quote(f"پاک‌سازی انجام شد: {result['deleted']} فایل، {result['deleted_size_human']}")
+    return RedirectResponse(url=f"/files?token={urllib.parse.quote(token)}&message={msg}", status_code=303)
