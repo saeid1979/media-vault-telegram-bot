@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MediaVault Admin</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+<main class="shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">MEDIAVAULT BOT V1.3</p>
+      <h1>مدیریت دانلودها و کاربران</h1>
+      <p>کنترل VIP، بلاک و محدودیت روزانه کاربران</p>
+    </div>
+    <form method="post" action="/cleanup?token={{ token }}">
+      <button type="submit">پاک‌سازی فایل‌های قدیمی</button>
+    </form>
+  </header>
+
+  <section class="cards">
+    <article><span>کل</span><strong>{{ cards.total }}</strong></article>
+    <article><span>موفق</span><strong>{{ cards.done }}</strong></article>
+    <article><span>خطا</span><strong>{{ cards.errors }}</strong></article>
+    <article><span>کاربران</span><strong>{{ cards.users }}</strong></article>
+    <article><span>VIP</span><strong>{{ cards.vip_users }}</strong></article>
+    <article><span>بلاک</span><strong>{{ cards.blocked_users }}</strong></article>
+    <article><span>امروز</span><strong>{{ cards.today }}</strong></article>
+    <article><span>حجم</span><strong>{{ cards.stored_size }}</strong></article>
+  </section>
+
+  <section class="panel" id="users">
+    <h2>مدیریت کاربران</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>User ID</th><th>Username</th><th>نام</th><th>دانلود</th><th>نقش و محدودیت</th></tr></thead>
+        <tbody>
+          {% for user in users_list %}
+          <tr>
+            <td>{{ user.user_id }}</td>
+            <td>{{ user.username or "-" }}</td>
+            <td>{{ user.first_name or "" }} {{ user.last_name or "" }}</td>
+            <td>{{ user.downloads_count or 0 }}</td>
+            <td>
+              <form class="user-form" method="post" action="/users/update?token={{ token }}">
+                <input type="hidden" name="user_id" value="{{ user.user_id }}">
+                <select name="role">
+                  <option value="normal" {% if user.role == "normal" %}selected{% endif %}>normal</option>
+                  <option value="vip" {% if user.role == "vip" %}selected{% endif %}>vip</option>
+                  <option value="admin" {% if user.role == "admin" %}selected{% endif %}>admin</option>
+                  <option value="blocked" {% if user.role == "blocked" %}selected{% endif %}>blocked</option>
+                </select>
+                <input name="daily_limit" placeholder="limit" value="{{ user.daily_limit or '' }}">
+                <label><input type="checkbox" name="is_blocked" {% if user.is_blocked %}checked{% endif %}> Block</label>
+                <button type="submit">ذخیره</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>آخرین درخواست‌ها</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>کاربر</th><th>پلتفرم</th><th>عنوان</th><th>حالت</th><th>وضعیت</th><th>حجم</th><th>زمان</th></tr></thead>
+        <tbody>
+          {% for row in recent %}
+          <tr>
+            <td>{{ row.id }}</td><td>{{ row.username or row.user_id }}</td><td>{{ row.platform }}</td>
+            <td class="title">{{ row.title or "-" }}</td><td>{{ row.mode }}</td>
+            <td><span class="status {{ row.status }}">{{ row.status }}</span></td>
+            <td>{{ row.file_size_label }}</td><td>{{ row.created_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>
