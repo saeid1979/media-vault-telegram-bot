@@ -1,5 +1,5 @@
-import urllib.parse
 from __future__ import annotations
+import urllib.parse
 
 import os
 import sqlite3
