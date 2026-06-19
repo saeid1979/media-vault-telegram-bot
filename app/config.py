@@ -30,6 +30,9 @@ class Settings:
     auto_cleanup_on_start: bool = os.getenv("AUTO_CLEANUP_ON_START", "True").lower() in {"1", "true", "yes", "on"}
     auto_cleanup_older_than_hours: int = int(os.getenv("AUTO_CLEANUP_OLDER_THAN_HOURS", "6"))
     max_storage_mb: int = int(os.getenv("MAX_STORAGE_MB", "500"))
+    normal_daily_limit: int = int(os.getenv("NORMAL_DAILY_LIMIT", os.getenv("DAILY_LIMIT", "10")))
+    vip_daily_limit: int = int(os.getenv("VIP_DAILY_LIMIT", "50"))
+    admin_daily_limit: int = int(os.getenv("ADMIN_DAILY_LIMIT", "9999"))
 
     @property
     def max_file_bytes(self) -> int:

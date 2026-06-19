@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>MediaVault Users</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{background:#0b1220;color:#f9fafb;font-family:Tahoma,Arial,sans-serif}
+    .wrap{max-width:1200px;margin:24px auto;padding:0 16px}
+    .card{background:#111827;border-radius:18px;padding:18px;margin-bottom:18px;box-shadow:0 10px 30px rgba(0,0,0,.2)}
+    .top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center}
+    h1{font-size:24px;margin:0 0 8px}.sub{color:#cbd5e1}
+    table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #374151;text-align:right}
+    th{background:#1f2937}.ltr{direction:ltr;text-align:left}
+    .btn{border:0;border-radius:10px;padding:8px 12px;text-decoration:none;color:white;font-weight:700;cursor:pointer;display:inline-block}
+    .blue{background:#2563eb}.green{background:#16a34a}.red{background:#dc2626}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .input,.select{background:#0b1220;color:white;border:1px solid #374151;border-radius:10px;padding:8px;max-width:120px}
+    .badge{border-radius:999px;padding:4px 9px;font-weight:700;display:inline-block}
+    .normal{background:#374151}.vip{background:#7c3aed}.admin{background:#16a34a}.blocked{background:#dc2626}
+    .msg{background:#064e3b}
+    @media(max-width:900px){th:nth-child(4),td:nth-child(4),th:nth-child(8),td:nth-child(8){display:none}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="top">
+      <div>
+        <h1>مدیریت کاربران - MediaVault V2.2</h1>
+        <div class="sub">نقش کاربران، محدودیت روزانه، VIP، Admin و Block</div>
+      </div>
+      <div class="actions">
+        <a class="btn blue" href="/?token={{ token }}">داشبورد</a>
+        <a class="btn blue" href="/files?token={{ token }}">فایل‌ها</a>
+        <a class="btn blue" href="/users?token={{ token }}">تازه‌سازی</a>
+      </div>
+    </div>
+    {% if message %}<div class="card msg">{{ message }}</div>{% endif %}
+  </div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>User ID</th><th>نام</th><th>Username</th><th>نقش</th><th>Blocked</th><th>Limit</th><th>مصرف امروز</th><th>آخرین بروزرسانی</th><th>عملیات</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td class="ltr">{{ u.user_id }}</td>
+          <td>{{ u.first_name or "" }} {{ u.last_name or "" }}</td>
+          <td class="ltr">{{ "@" + u.username if u.username else "" }}</td>
+          <td><span class="badge {{ u.role }}">{{ u.role }}</span></td>
+          <td>{% if u.is_blocked %}<span class="badge blocked">Blocked</span>{% else %}No{% endif %}</td>
+          <td>{{ u.effective_limit }}</td>
+          <td>{{ u.used_today }}</td>
+          <td class="ltr">{{ u.updated_at or "" }}</td>
+          <td>
+            <form method="post" action="/users/update" class="actions">
+              <input type="hidden" name="token" value="{{ token }}">
+              <input type="hidden" name="user_id" value="{{ u.user_id }}">
+              <select name="role" class="select">
+                <option value="normal" {% if u.role == "normal" %}selected{% endif %}>normal</option>
+                <option value="vip" {% if u.role == "vip" %}selected{% endif %}>vip</option>
+                <option value="admin" {% if u.role == "admin" %}selected{% endif %}>admin</option>
+              </select>
+              <select name="is_blocked" class="select">
+                <option value="0" {% if not u.is_blocked %}selected{% endif %}>active</option>
+                <option value="1" {% if u.is_blocked %}selected{% endif %}>blocked</option>
+              </select>
+              <input class="input" type="number" name="daily_limit" value="{{ u.daily_limit or '' }}" placeholder="limit">
+              <button class="btn green" type="submit">ذخیره</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

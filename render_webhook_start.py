@@ -95,10 +95,10 @@ async def lifespan(app):
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
         )
-        print("MediaVault Bot V2.1 webhook mode is running.")
+        print("MediaVault Bot V2.2 webhook mode is running.")
         print(f"Webhook URL: {webhook_url}")
     else:
-        print("MediaVault Bot V2.1 local web mode is running.")
+        print("MediaVault Bot V2.2 local web mode is running.")
         print("Webhook was NOT set because PUBLIC_BASE_URL is not HTTPS.")
         print(f"Local panel: {public_base_url}")
         print("For local Telegram bot testing, use: python run.py")
@@ -125,7 +125,7 @@ async def healthz():
     return {
         "status": "ok",
         "mode": "webhook",
-        "version": "2.1",
+        "version": "2.2",
     }
 
 

@@ -180,18 +180,33 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def limits_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    register_user(update)
-    user_id = update.effective_user.id
-    used = db.count_today(user_id)
-    text = (
-        "محدودیت‌های فعلی:\n\n"
-        f"حداکثر حجم فایل: {settings.max_file_mb} MB\n"
-        f"حداکثر دانلود روزانه: {settings.daily_limit}\n"
-        f"مصرف امروز شما: {used}/{settings.daily_limit}\n"
-        f"حذف خودکار فایل‌ها بعد از: {settings.auto_delete_hours} ساعت"
-    )
-    await update.message.reply_text(text)
+    user = update.effective_user
+    if not user:
+        return
 
+    db.ensure_user(user_id=user.id, username=user.username, first_name=user.first_name, last_name=user.last_name)
+
+    status = db.get_user_usage_status(user.id)
+    info = status["user"]
+    role = (info.get("role") or "normal").lower()
+
+    if status["is_blocked"]:
+        await update.effective_message.reply_text(
+            "⛔ حساب شما در حال حاضر مسدود است.\\n"
+            "برای فعال‌سازی دوباره با مدیر ربات تماس بگیرید."
+        )
+        return
+
+    await update.effective_message.reply_text(
+        "📊 وضعیت حساب شما\\n\\n"
+        f"نقش حساب: {role}\\n"
+        f"مصرف امروز: {status['used']}\\n"
+        f"محدودیت روزانه: {status['limit']}\\n"
+        f"باقی‌مانده امروز: {status['remaining']}\\n\\n"
+        "Normal: محدودیت عادی\\n"
+        "VIP: محدودیت بیشتر\\n"
+        "Admin: دسترسی مدیریتی"
+    )
 
 async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     register_user(update)
@@ -218,7 +233,34 @@ async def history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text("\n\n".join(lines))
 
 
+async def _v22_check_user_access(update: Update) -> bool:
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return False
+
+    db.ensure_user(user_id=user.id, username=user.username, first_name=user.first_name, last_name=user.last_name)
+
+    if db.is_user_blocked(user.id):
+        await msg.reply_text("⛔ حساب شما برای استفاده از ربات مسدود شده است.")
+        return False
+
+    usage = db.get_user_usage_status(user.id)
+    if usage["remaining"] <= 0:
+        await msg.reply_text(
+            "⏳ محدودیت روزانه شما تمام شده است.\\n\\n"
+            f"مصرف امروز: {usage['used']}\\n"
+            f"محدودیت روزانه: {usage['limit']}\\n\\n"
+            "برای افزایش محدودیت، حساب VIP لازم است."
+        )
+        return False
+
+    return True
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _v22_check_user_access(update):
+        return
+
     register_user(update)
     text = update.message.text or ""
     url = extract_first_url(text)

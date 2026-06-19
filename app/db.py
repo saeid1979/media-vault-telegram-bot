@@ -226,3 +226,183 @@ def cleanup_old_files(hours: int) -> int:
                 pass
         conn.execute("UPDATE downloads SET file_path = NULL WHERE created_at < ?", (cutoff.isoformat(timespec="seconds"),))
     return deleted
+
+def ensure_user_plan_schema() -> None:
+    """Ensure bot_users table and V2.2 columns exist."""
+    with get_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                role TEXT DEFAULT 'normal',
+                is_blocked INTEGER DEFAULT 0,
+                daily_limit INTEGER,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(bot_users)").fetchall()}
+        migrations = {
+            "username": "ALTER TABLE bot_users ADD COLUMN username TEXT",
+            "first_name": "ALTER TABLE bot_users ADD COLUMN first_name TEXT",
+            "last_name": "ALTER TABLE bot_users ADD COLUMN last_name TEXT",
+            "role": "ALTER TABLE bot_users ADD COLUMN role TEXT DEFAULT 'normal'",
+            "is_blocked": "ALTER TABLE bot_users ADD COLUMN is_blocked INTEGER DEFAULT 0",
+            "daily_limit": "ALTER TABLE bot_users ADD COLUMN daily_limit INTEGER",
+            "created_at": "ALTER TABLE bot_users ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "ALTER TABLE bot_users ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP",
+        }
+        for col, sql in migrations.items():
+            if col not in existing:
+                conn.execute(sql)
+        conn.commit()
+
+
+def ensure_user(user_id: int, username: str | None = None, first_name: str | None = None, last_name: str | None = None) -> dict:
+    ensure_user_plan_schema()
+    with get_connection() as conn:
+        row = conn.execute("SELECT user_id FROM bot_users WHERE user_id = ?", (user_id,)).fetchone()
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO bot_users (user_id, username, first_name, last_name, role, is_blocked, daily_limit)
+                VALUES (?, ?, ?, ?, 'normal', 0, NULL)
+                """,
+                (user_id, username, first_name, last_name),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE bot_users
+                SET username = COALESCE(?, username),
+                    first_name = COALESCE(?, first_name),
+                    last_name = COALESCE(?, last_name),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                """,
+                (username, first_name, last_name, user_id),
+            )
+        conn.commit()
+    return get_user_control(user_id)
+
+
+def get_user_control(user_id: int) -> dict:
+    ensure_user_plan_schema()
+    with get_connection() as conn:
+        cur = conn.execute(
+            "SELECT user_id, username, first_name, last_name, role, is_blocked, daily_limit, created_at, updated_at FROM bot_users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return {"user_id": user_id, "username": None, "first_name": None, "last_name": None, "role": "normal", "is_blocked": 0, "daily_limit": None}
+        columns = [d[0] for d in cur.description]
+        return dict(zip(columns, row))
+
+
+def get_role_daily_limit(role: str) -> int:
+    from app.config import settings
+    role = (role or "normal").lower()
+    if role == "admin":
+        return int(getattr(settings, "admin_daily_limit", 9999))
+    if role == "vip":
+        return int(getattr(settings, "vip_daily_limit", 50))
+    return int(getattr(settings, "normal_daily_limit", getattr(settings, "daily_limit", 10)))
+
+
+def get_effective_daily_limit(user_id: int) -> int:
+    user = get_user_control(user_id)
+    custom = user.get("daily_limit")
+    if custom is not None:
+        try:
+            return int(custom)
+        except Exception:
+            pass
+    return get_role_daily_limit(user.get("role", "normal"))
+
+
+def is_user_blocked(user_id: int) -> bool:
+    user = get_user_control(user_id)
+    return bool(int(user.get("is_blocked") or 0))
+
+
+def update_user_control(user_id: int, role: str | None = None, is_blocked: int | bool | None = None, daily_limit: int | None = None) -> None:
+    ensure_user_plan_schema()
+    role = (role or "normal").lower()
+    if role not in {"normal", "vip", "admin"}:
+        role = "normal"
+    blocked_value = 1 if bool(is_blocked) else 0
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO bot_users (user_id, role, is_blocked, daily_limit)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                role = excluded.role,
+                is_blocked = excluded.is_blocked,
+                daily_limit = excluded.daily_limit,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, role, blocked_value, daily_limit),
+        )
+        conn.commit()
+
+
+def list_users(limit: int = 500) -> list[dict]:
+    ensure_user_plan_schema()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            SELECT user_id, username, first_name, last_name, role, is_blocked, daily_limit, created_at, updated_at
+            FROM bot_users
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        columns = [d[0] for d in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def count_today_downloads(user_id: int) -> int:
+    with get_connection() as conn:
+        try:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM downloads
+                WHERE user_id = ?
+                  AND date(created_at) = date('now', 'localtime')
+                  AND status IN ('done', 'processing')
+                """,
+                (user_id,),
+            ).fetchone()
+            return int(row[0] if row else 0)
+        except Exception:
+            return 0
+
+
+def get_user_usage_status(user_id: int) -> dict:
+    user = get_user_control(user_id)
+    limit = get_effective_daily_limit(user_id)
+    used = count_today_downloads(user_id)
+    remaining = max(0, limit - used)
+    return {"user": user, "limit": limit, "used": used, "remaining": remaining, "is_blocked": is_user_blocked(user_id)}
+
+# V2.2 init_db wrapper
+try:
+    _v22_original_init_db = init_db
+
+    def init_db() -> None:
+        _v22_original_init_db()
+        ensure_user_plan_schema()
+except NameError:
+    pass
+
+
+# V2.2 compatibility alias
+def get_connection():
+    return connect()

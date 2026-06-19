@@ -168,3 +168,42 @@ async def files_enforce_storage(token: str = Form(""), max_mb: int = Form(500)):
         url=f"/files?token={urllib.parse.quote(token)}&message={msg}",
         status_code=303,
     )
+
+from app import db as app_db
+
+@app.get("/users")
+async def users_page(request: Request, token: str = "", message: str = ""):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+
+    users = []
+    for u in app_db.list_users():
+        usage = app_db.get_user_usage_status(int(u["user_id"]))
+        u["effective_limit"] = usage["limit"]
+        u["used_today"] = usage["used"]
+        u["is_blocked"] = bool(int(u.get("is_blocked") or 0))
+        u["role"] = (u.get("role") or "normal").lower()
+        users.append(u)
+
+    return templates.TemplateResponse(
+        "users.html",
+        {"request": request, "token": token, "users": users, "message": message},
+    )
+
+
+@app.post("/users/update")
+async def users_update(token: str = Form(""), user_id: int = Form(...), role: str = Form("normal"), is_blocked: int = Form(0), daily_limit: str = Form("")):
+    if not _v2_admin_token_ok(token):
+        _v2_forbidden()
+
+    custom_limit = None
+    if daily_limit is not None and str(daily_limit).strip() != "":
+        try:
+            custom_limit = max(0, int(daily_limit))
+        except Exception:
+            custom_limit = None
+
+    app_db.update_user_control(user_id=int(user_id), role=role, is_blocked=int(is_blocked), daily_limit=custom_limit)
+
+    msg = urllib.parse.quote(f"کاربر {user_id} بروزرسانی شد.")
+    return RedirectResponse(url=f"/users?token={urllib.parse.quote(token)}&message={msg}", status_code=303)
