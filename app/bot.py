@@ -21,7 +21,6 @@ from app.direct_downloader import is_direct_media_url, download_direct_media
 from app.keyboards import rights_keyboard, format_keyboard
 from app.policy import detect_platform, policy_message
 from app.utils import extract_first_url, short_hash, human_duration, human_size
-from app.upload_handler import handle_media_upload
 from app.temp_links import create_temp_link
 
 PENDING: dict[str, dict] = {}
@@ -459,8 +458,7 @@ def main() -> None:
     app.add_handler(CommandHandler("history", history_cmd))
     app.add_handler(CommandHandler("limits", limits_cmd))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler((filters.VIDEO | filters.AUDIO | filters.Document.ALL), handle_media_upload))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("MediaVault Telegram Bot V1.9 is running...")
+    print("MediaVault Telegram Bot V1.8 is running...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
