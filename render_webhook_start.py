@@ -69,7 +69,7 @@ async def lifespan(app):
         drop_pending_updates=True,
     )
 
-    print('MediaVault Bot V1.7 webhook is running.')
+    print('MediaVault Bot V1.8 webhook is running.')
     print(f'Webhook URL: {webhook_url}')
 
     try:

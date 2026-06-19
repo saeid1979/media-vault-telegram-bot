@@ -16,6 +16,34 @@ class DownloadError(Exception):
     pass
 
 
+def make_user_friendly_download_error(error_text: str) -> str:
+    lower = error_text.lower()
+    if 'sign in to confirm' in lower or 'not a bot' in lower:
+        return (
+            'YouTube این درخواست را به‌عنوان ربات تشخیص داده و اجازه دانلود نمی‌دهد.\n\n'
+            'این مشکل معمولاً روی سرورهای ابری مثل Render اتفاق می‌افتد.\n'
+            'این ربات برای امنیت و رعایت قوانین، از ورود با حساب کاربری یا cookie استفاده نمی‌کند.\n\n'
+            'راه‌حل: یک لینک عمومی دیگر یا لینک مستقیم فایل ویدئو/صدا مثل mp4 یا mp3 ارسال کن.'
+        )
+    if 'unsupported url' in lower:
+        return (
+            'این لینک در نسخه فعلی پشتیبانی نمی‌شود.\n\n'
+            'لینک‌های پست یا صفحات نیازمند ورود معمولاً قابل دانلود نیستند.\n'
+            'لطفاً لینک مستقیم فایل عمومی مثل mp4/mp3/m4a/webm ارسال کن.'
+        )
+    if 'linkedin' in lower:
+        return (
+            'LinkedIn در این نسخه فقط برای لینک مستقیم فایل ویدئو/صدا پشتیبانی می‌شود.\n\n'
+            'بیشتر ویدئوهای LinkedIn پشت login/session هستند و بدون ورود قابل دریافت نیستند.'
+        )
+    if 'private video' in lower or 'login' in lower or 'requires authentication' in lower:
+        return (
+            'این محتوا عمومی نیست یا نیاز به ورود دارد.\n\n'
+            'ربات فقط محتوای عمومی یا لینک مستقیم فایل‌هایی را می‌پذیرد که اجازه دانلودشان را داری.'
+        )
+    return error_text
+
+
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 
@@ -282,7 +310,7 @@ def _download_sync(
         with yt_dlp.YoutubeDL(opts) as ydl:
             ydl.download([url])
     except yt_dlp.utils.DownloadError as exc:
-        raise DownloadError(str(exc)) from exc
+        raise DownloadError(make_user_friendly_download_error(str(exc))) from exc
 
     file_path = find_largest_media_file(job_dir)
     if not file_path:

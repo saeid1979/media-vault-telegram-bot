@@ -17,6 +17,7 @@ from telegram.ext import (
 from app.config import settings
 from app import db
 from app.downloader import extract_info, download_media, DownloadError
+from app.direct_downloader import is_direct_media_url, download_direct_media
 from app.keyboards import rights_keyboard, format_keyboard
 from app.policy import detect_platform, policy_message
 from app.utils import extract_first_url, short_hash, human_duration, human_size
@@ -267,10 +268,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         await query.edit_message_text("⏳ در حال خواندن اطلاعات لینک...")
         try:
+            if is_direct_media_url(item["url"]):
+                item["title"] = "Direct media file"
+                item["info"] = {"title": "Direct media file"}
+                text = (
+                    "✅ لینک مستقیم فایل شناسایی شد.\n\n"
+                    "این نوع لینک بدون نیاز به استخراج از پلتفرم دانلود می‌شود.\n\n"
+                    "کیفیت خروجی را انتخاب کن:"
+                )
+                await query.edit_message_text(text, reply_markup=format_keyboard(url_id), disable_web_page_preview=True)
+                return
+            if "linkedin.com" in item["url"].lower():
+                await query.edit_message_text(
+                    "LinkedIn در این نسخه فقط برای لینک مستقیم فایل ویدئو/صدا پشتیبانی می‌شود.\n\n"
+                    "لینک‌های پست LinkedIn معمولاً نیاز به ورود دارند و پشتیبانی نمی‌شوند.\n"
+                    "لطفاً لینک مستقیم فایل عمومی مثل mp4/mp3 ارسال کن."
+                )
+                return
             info = await extract_info(item["url"])
             item["title"] = info["title"]
             item["info"] = info
-
             text = (
                 "🎬 محتوا پیدا شد\n\n"
                 f"عنوان: {info['title'][:120]}\n"
@@ -328,13 +345,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             await context.bot.send_chat_action(chat_id=user.id, action=ChatAction.UPLOAD_DOCUMENT)
 
-            file_path = await run_download_in_queue(
-                status_msg,
-                user.id,
-                item["url"],
-                mode,
-                progress_callback,
-            )
+            if is_direct_media_url(item["url"]):
+                file_path = await download_direct_media(
+                    item["url"],
+                    user.id,
+                    progress_callback=progress_callback,
+                )
+            else:
+                file_path = await run_download_in_queue(
+                    status_msg,
+                    user.id,
+                    item["url"],
+                    mode,
+                    progress_callback,
+                )
 
             stop_event.set()
             await reporter_task
@@ -436,5 +460,5 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("MediaVault Telegram Bot V1.6 is running...")
+    print("MediaVault Telegram Bot V1.8 is running...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
