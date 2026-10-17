@@ -430,7 +430,7 @@ public final class TelegramBotService extends Service {
             String first = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n"
                 + chat + "\r\n--" + boundary + "\r\n"
                 + "Content-Disposition: form-data; name=\"document\"; filename=\""
-                + file.getName().replace("\"", "_") + "\"\r\n"
+                + file.getName().replaceAll("[\\r\\n\"\\\\]", "_") + "\"\r\n"
                 + "Content-Type: application/octet-stream\r\n\r\n";
             output.write(first.getBytes(StandardCharsets.UTF_8));
             try (InputStream input = new BufferedInputStream(new FileInputStream(file))) {
@@ -442,9 +442,16 @@ public final class TelegramBotService extends Service {
         }
         int code = conn.getResponseCode();
         try (InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream()) {
-            byte[] bytes = new byte[65536];
-            int size = stream == null ? 0 : stream.read(bytes);
-            if (size <= 0 || !new JSONObject(new String(bytes, 0, size, StandardCharsets.UTF_8)).optBoolean("ok"))
+            if (stream == null) throw new Exception("Telegram upload failed: " + code);
+            java.io.ByteArrayOutputStream response = new java.io.ByteArrayOutputStream();
+            byte[] data = new byte[4096];
+            int n, total = 0;
+            while ((n = stream.read(data)) != -1) {
+                total += n;
+                if (total > 1024 * 1024) throw new Exception("Telegram response too large");
+                response.write(data, 0, n);
+            }
+            if (!new JSONObject(response.toString("UTF-8")).optBoolean("ok"))
                 throw new Exception("Telegram upload failed: " + code);
         } finally { conn.disconnect(); }
     }
