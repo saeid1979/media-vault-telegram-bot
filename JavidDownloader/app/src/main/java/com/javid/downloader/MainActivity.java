@@ -509,7 +509,7 @@ public class MainActivity extends Activity {
         int pos = m.lastIndexOf("ERROR:");
         if (pos >= 0) m = m.substring(pos);
         m = m.trim();
-        int newline = m.indexOf('\\n');
+        int newline = m.indexOf('\n');
         if (newline > 0) m = m.substring(0, newline);
         return m.length() > 290 ? m.substring(0, 290) : m;
     }
