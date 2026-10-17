@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
     private EditText linkBox;
     private TextView state, detail;
     private ProgressBar progress;
-    private Button startButton, checkButton, cancelButton;
+    private Button startButton, checkButton, cancelButton, updateButton;
     private Spinner quality;
     private LinearLayout downloadPanel, historyPanel, historyItems;
     private volatile boolean engineReady = false;
@@ -85,7 +85,13 @@ public class MainActivity extends Activity {
                 YoutubeDL.getInstance().init(getApplicationContext());
                 FFmpeg.getInstance().init(getApplicationContext());
                 engineReady = true;
-                runOnUiThread(() -> setStatus("آماده دریافت لینک", false));
+                runOnUiThread(() -> {
+                    setStatus("موتور دانلود آماده است", false);
+                    long lastCheck = getPreferences(MODE_PRIVATE).getLong("last_engine_check", 0L);
+                    if (System.currentTimeMillis() - lastCheck > 24L * 60 * 60 * 1000) {
+                        updateEngine(true);
+                    }
+                });
             } catch (Exception e) {
                 runOnUiThread(() -> setStatus("راه‌اندازی موتور دانلود ناموفق بود: " + message(e), true));
             }
@@ -164,6 +170,10 @@ public class MainActivity extends Activity {
         card.addView(checkButton);
         checkButton.setOnClickListener(v -> inspect());
         card.addView(gap(9));
+        updateButton = button("↻  به‌روزرسانی موتور دانلود", PALE, TEAL);
+        card.addView(updateButton);
+        updateButton.setOnClickListener(v -> updateEngine(false));
+        card.addView(gap(9));
         startButton = button("⬇  شروع دانلود", TEAL, Color.WHITE);
         card.addView(startButton);
         startButton.setOnClickListener(v -> download());
@@ -233,6 +243,35 @@ public class MainActivity extends Activity {
             downTab.setBackground(round(PALE, 12));
             downTab.setTextColor(NAVY);
             scroll.smoothScrollTo(0, 0);
+        });
+    }
+
+    private void updateEngine(boolean automatic) {
+        if (!begin()) return;
+        setStatus(automatic ? "در حال بررسی نسخه جدید موتور دانلود..." : "در حال به‌روزرسانی موتور دانلود...", false);
+        detail.setText("برای دریافت نسخه جدید اینترنت لازم است. لطفاً منتظر بمان.");
+        executor.execute(() -> {
+            try {
+                YoutubeDL.UpdateStatus result = YoutubeDL.getInstance()
+                    .updateYoutubeDL(getApplicationContext(), YoutubeDL.UpdateChannel._STABLE);
+                getPreferences(MODE_PRIVATE).edit().putLong("last_engine_check", System.currentTimeMillis()).apply();
+                String version = YoutubeDL.getInstance().version(getApplicationContext());
+                String text = result == YoutubeDL.UpdateStatus.DONE
+                    ? "موتور دانلود با موفقیت به‌روز شد ✓"
+                    : "موتور دانلود به‌روز است ✓";
+                runOnUiThread(() -> {
+                    setStatus(text, false);
+                    detail.setText(version == null ? "اکنون دانلود را امتحان کن" : "نسخه موتور: " + version);
+                });
+            } catch (Exception e) {
+                getPreferences(MODE_PRIVATE).edit().putLong("last_engine_check", System.currentTimeMillis()).apply();
+                runOnUiThread(() -> {
+                    setStatus("به‌روزرسانی انجام نشد: " + message(e), true);
+                    detail.setText("اتصال اینترنت را بررسی کن یا دوباره دکمه به‌روزرسانی را بزن.");
+                });
+            } finally {
+                runOnUiThread(() -> end());
+            }
         });
     }
 
@@ -433,6 +472,7 @@ public class MainActivity extends Activity {
         busy = true;
         startButton.setEnabled(false);
         checkButton.setEnabled(false);
+        updateButton.setEnabled(false);
         return true;
     }
 
@@ -440,6 +480,7 @@ public class MainActivity extends Activity {
         busy = false;
         startButton.setEnabled(true);
         checkButton.setEnabled(true);
+        updateButton.setEnabled(true);
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -464,14 +505,20 @@ public class MainActivity extends Activity {
     private String message(Exception e) {
         String m = e.getMessage();
         if (m == null || m.length() == 0) return e.getClass().getSimpleName();
-        return m.length() > 150 ? m.substring(0, 150) : m;
+        // A yt-dlp warning may precede the actual failure. Show the last real ERROR line.
+        int pos = m.lastIndexOf("ERROR:");
+        if (pos >= 0) m = m.substring(pos);
+        m = m.trim();
+        int newline = m.indexOf('\\n');
+        if (newline > 0) m = m.substring(0, newline);
+        return m.length() > 290 ? m.substring(0, 290) : m;
     }
     private void setStatus(String s, boolean error) {
         if (state != null) {
             state.setText(s);
             state.setTextColor(error ? Color.rgb(182, 58, 54) : TEAL);
         }
-        if (error && detail != null) detail.setText("ممکن است لینک محدود یا سرویس موقتاً در دسترس نباشد.");
+        if (error && detail != null) detail.setText("اگر خطا ادامه داشت، موتور دانلود را به‌روز کن و لینک را دوباره امتحان کن.");
     }
     private void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
     private int dp(int n) { return (int)(n * getResources().getDisplayMetrics().density + 0.5f); }
