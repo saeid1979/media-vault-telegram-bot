@@ -72,8 +72,8 @@ public class MainActivity extends Activity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     private EditText linkBox;
-    private TextView state, detail, sourceInfo, previewTitle, previewMeta, previewDuration;
-    private ProgressBar progress;
+    private TextView state, detail, sourceInfo, previewTitle, previewMeta, previewDuration, engineUpdateStatus;
+    private ProgressBar progress, updateProgress;
     private Button startButton, checkButton, cancelButton, updateButton, videoButton, audioButton;
     private Spinner quality;
     private LinearLayout downloadPanel, historyPanel, morePanel, historyItems, previewPanel;
@@ -98,13 +98,19 @@ public class MainActivity extends Activity {
                 engineReady = true;
                 runOnUiThread(() -> {
                     setStatus("موتور دانلود آماده است", false);
+                    engineUpdateStatus.setText("موتور آماده است. برای دریافت جدیدترین نسخه دکمه بالا را بزن.");
+                    engineUpdateStatus.setTextColor(TEAL);
                     long lastCheck = getPreferences(MODE_PRIVATE).getLong("last_engine_check", 0L);
                     if (System.currentTimeMillis() - lastCheck > 24L * 60 * 60 * 1000) {
                         updateEngine(true);
                     }
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> setStatus("راه‌اندازی موتور دانلود ناموفق بود: " + message(e), true));
+                runOnUiThread(() -> {
+                    setStatus("راه‌اندازی موتور دانلود ناموفق بود: " + message(e), true);
+                    engineUpdateStatus.setText("راه‌اندازی موتور ناموفق بود: " + message(e));
+                    engineUpdateStatus.setTextColor(Color.rgb(178, 50, 52));
+                });
             }
         });
     }
@@ -288,9 +294,17 @@ public class MainActivity extends Activity {
         settings.setPadding(dp(17), dp(17), dp(17), dp(17));
         settings.addView(label("تنظیمات", 18, INK, true));
         settings.addView(gap(12));
-        updateButton = styledButton("↻  به‌روزرسانی موتور دانلود", LAVENDER, INK, 13, 13);
+        updateButton = styledButton("↻  بررسی و به‌روزرسانی موتور", NAVY, Color.WHITE, 13, 13);
         settings.addView(updateButton, new LinearLayout.LayoutParams(-1, dp(52)));
         updateButton.setOnClickListener(v -> updateEngine(false));
+        updateProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        updateProgress.setIndeterminate(true);
+        updateProgress.setProgressTintList(ColorStateList.valueOf(TEAL));
+        updateProgress.setIndeterminateTintList(ColorStateList.valueOf(TEAL));
+        updateProgress.setVisibility(View.GONE);
+        settings.addView(updateProgress, margin(0, 10, 0, 3));
+        engineUpdateStatus = label("وضعیت موتور: در حال آماده‌سازی...", 12, MUTED, false);
+        settings.addView(engineUpdateStatus, margin(0, 10, 0, 0));
         settings.addView(gap(17));
         settings.addView(label("محل ذخیره فایل‌ها", 15, INK, true));
         settings.addView(label("Downloads / JavidDownloader", 13, MUTED, false));
@@ -396,30 +410,62 @@ public class MainActivity extends Activity {
     }
 
     private void updateEngine(boolean automatic) {
+        if (!engineReady) {
+            engineUpdateStatus.setText("موتور هنوز آماده نیست. چند لحظه بعد دوباره امتحان کن.");
+            toast("در حال آماده‌سازی موتور دانلود");
+            return;
+        }
+        if (busy) {
+            engineUpdateStatus.setText("یک عملیات دیگر در حال انجام است؛ پس از پایان دوباره امتحان کن.");
+            toast("لطفاً تا پایان عملیات فعلی منتظر بمان");
+            return;
+        }
         if (!begin()) return;
-        setStatus(automatic ? "در حال بررسی نسخه جدید موتور دانلود..." : "در حال به‌روزرسانی موتور دانلود...", false);
-        detail.setText("برای دریافت نسخه جدید اینترنت لازم است. لطفاً منتظر بمان.");
+        String pending = automatic
+            ? "در حال بررسی خودکار به‌روزرسانی موتور..."
+            : "در حال بررسی نسخه جدید و دریافت به‌روزرسانی...";
+        setStatus(pending, false);
+        detail.setText("برای این عملیات اتصال اینترنت لازم است.");
+        engineUpdateStatus.setText(pending);
+        engineUpdateStatus.setTextColor(NAVY);
+        updateProgress.setVisibility(View.VISIBLE);
+        updateButton.setText("◌  در حال به‌روزرسانی...");
         executor.execute(() -> {
             try {
                 YoutubeDL.UpdateStatus result = YoutubeDL.getInstance()
                     .updateYoutubeDL(getApplicationContext(), YoutubeDL.UpdateChannel._STABLE);
-                getPreferences(MODE_PRIVATE).edit().putLong("last_engine_check", System.currentTimeMillis()).apply();
                 String version = YoutubeDL.getInstance().version(getApplicationContext());
-                String text = result == YoutubeDL.UpdateStatus.DONE
+                long now = System.currentTimeMillis();
+                getPreferences(MODE_PRIVATE).edit().putLong("last_engine_check", now).apply();
+                String outcome = result == YoutubeDL.UpdateStatus.DONE
                     ? "موتور دانلود با موفقیت به‌روز شد ✓"
-                    : "موتور دانلود به‌روز است ✓";
+                    : "موتور دانلود از قبل به‌روز بود ✓";
+                String visible = outcome + (version == null || version.isEmpty() ? ""
+                    : "\nنسخه: " + version);
                 runOnUiThread(() -> {
-                    setStatus(text, false);
-                    detail.setText(version == null ? "اکنون دانلود را امتحان کن" : "نسخه موتور: " + version);
+                    setStatus(outcome, false);
+                    detail.setText("موتور آماده دانلود است.");
+                    engineUpdateStatus.setText(visible);
+                    engineUpdateStatus.setTextColor(TEAL);
+                    if (!automatic) toast(outcome);
                 });
             } catch (Exception e) {
-                getPreferences(MODE_PRIVATE).edit().putLong("last_engine_check", System.currentTimeMillis()).apply();
+                String error = message(e);
+                // A failed check must not be marked successful for the next 24h.
                 runOnUiThread(() -> {
-                    setStatus("به‌روزرسانی انجام نشد: " + message(e), true);
-                    detail.setText("اتصال اینترنت را بررسی کن یا دوباره دکمه به‌روزرسانی را بزن.");
+                    String failure = "به‌روزرسانی انجام نشد: " + error;
+                    setStatus(failure, true);
+                    detail.setText("اتصال اینترنت را بررسی و دوباره امتحان کن.");
+                    engineUpdateStatus.setText(failure + "\nبرای تلاش دوباره روی دکمه بالا بزن.");
+                    engineUpdateStatus.setTextColor(Color.rgb(178, 50, 52));
+                    if (!automatic) toast("به‌روزرسانی انجام نشد");
                 });
             } finally {
-                runOnUiThread(() -> end());
+                runOnUiThread(() -> {
+                    updateProgress.setVisibility(View.GONE);
+                    updateButton.setText("↻  بررسی و به‌روزرسانی موتور");
+                    end();
+                });
             }
         });
     }
