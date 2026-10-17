@@ -104,6 +104,20 @@ public class MainActivity extends Activity {
         app.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         app.setBackgroundColor(PALE);
         setContentView(app);
+        // Android 15+ enforces edge-to-edge. Keep the header and bottom tabs
+        // outside the system status/navigation bar gesture areas.
+        app.setOnApplyWindowInsetsListener((view, insets) -> {
+            int top, bottom;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                top = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
+                bottom = insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom;
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            view.setPadding(0, top, 0, bottom);
+            return insets;
+        });
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
