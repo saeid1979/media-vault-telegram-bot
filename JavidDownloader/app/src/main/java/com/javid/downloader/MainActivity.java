@@ -1,6 +1,11 @@
 package com.javid.downloader;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
@@ -76,8 +81,15 @@ public class MainActivity extends Activity {
     private ProgressBar progress, updateProgress;
     private Button startButton, checkButton, cancelButton, updateButton, videoButton, audioButton;
     private Spinner quality;
-    private LinearLayout downloadPanel, historyPanel, morePanel, historyItems, previewPanel;
+    private LinearLayout downloadPanel, historyPanel, morePanel, historyItems, previewPanel, botPanel;
     private ImageView previewImage;
+    private EditText botTokenInput;
+    private TextView botStatus, botIdentity, pairingInfo;
+    private android.widget.Switch wifiOnly;
+    private final Handler botUiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable botUiTick = new Runnable() {
+        @Override public void run() { refreshBotUi(); botUiHandler.postDelayed(this, 4000); }
+    };
     private volatile String previewUrl = "";
     private volatile boolean engineReady = false;
     private volatile boolean busy = false;
@@ -285,6 +297,96 @@ public class MainActivity extends Activity {
         historyPanel.addView(past);
         content.addView(historyPanel);
 
+        // Phone-hosted Telegram bot companion. No token is included in the APK.
+        botPanel = vertical();
+        botPanel.setVisibility(View.GONE);
+        botPanel.addView(label("بات تلگرام", 24, INK, true));
+        botPanel.addView(gap(7));
+        botPanel.addView(label("بات فعلی خودت را روی همین گوشی اجرا و مدیریت کن.", 13, MUTED, false));
+        botPanel.addView(gap(14));
+        LinearLayout botCard = vertical();
+        botCard.setPadding(dp(16), dp(18), dp(16), dp(18));
+        botCard.setBackground(round(Color.WHITE, 20));
+        botCard.addView(label("اتصال بات موجود", 17, INK, true));
+        botCard.addView(gap(8));
+        botCard.addView(label("توکن فعلی BotFather را فقط اینجا وارد کن؛ به‌صورت رمزنگاری‌شده روی گوشی ذخیره می‌شود.",
+            12, MUTED, false));
+        botCard.addView(gap(13));
+        botTokenInput = new EditText(this);
+        botTokenInput.setTextSize(13);
+        botTokenInput.setSingleLine(true);
+        botTokenInput.setHint("توکن بات موجود...");
+        botTokenInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        botTokenInput.setTextDirection(View.TEXT_DIRECTION_LTR);
+        botTokenInput.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        botTokenInput.setPadding(dp(13), 0, dp(13), 0);
+        botTokenInput.setBackground(outline(Color.rgb(247, 249, 252), Color.rgb(225, 230, 242), 13));
+        botCard.addView(botTokenInput, new LinearLayout.LayoutParams(-1, dp(54)));
+        botCard.addView(gap(10));
+        Button saveToken = styledButton("🔒  ذخیره امن توکن", Color.rgb(231, 238, 252), INK, 13, 13);
+        botCard.addView(saveToken, new LinearLayout.LayoutParams(-1, dp(50)));
+        saveToken.setOnClickListener(v -> saveBotToken());
+        botCard.addView(gap(14));
+        botIdentity = label("هنوز توکن ثبت نشده", 13, INK, true);
+        botCard.addView(botIdentity);
+        botCard.addView(gap(6));
+        botStatus = label("وضعیت: خاموش", 12, MUTED, false);
+        botCard.addView(botStatus);
+        botCard.addView(gap(12));
+        LinearLayout controls = horizontal();
+        Button run = styledButton("▶  روشن کردن بات", TEAL, Color.WHITE, 13, 13);
+        Button stop = styledButton("■  خاموش کردن", Color.rgb(243, 232, 232), Color.rgb(154, 51, 54), 13, 13);
+        controls.addView(run, new LinearLayout.LayoutParams(0, dp(53), 1f));
+        controls.addView(gapHorizontal(9));
+        controls.addView(stop, new LinearLayout.LayoutParams(0, dp(53), 1f));
+        botCard.addView(controls);
+        run.setOnClickListener(v -> startTelegramBot());
+        stop.setOnClickListener(v -> {
+            Intent intent = new Intent(this, TelegramBotService.class).setAction(TelegramBotService.ACTION_STOP);
+            startService(intent);
+            toast("دستور توقف ارسال شد");
+            botUiHandler.postDelayed(this::refreshBotUi, 900);
+        });
+        botCard.addView(gap(17));
+        botCard.addView(label("اتصال حساب مالک", 15, INK, true));
+        pairingInfo = label("پس از روشن کردن بات، کد اتصال را از این قسمت بردار و در تلگرام به بات بفرست.",
+            12, MUTED, false);
+        botCard.addView(pairingInfo, margin(0, 9, 0, 9));
+        Button resetPair = styledButton("↻  ساخت کد اتصال جدید", Color.rgb(242, 244, 250), INK, 12, 13);
+        botCard.addView(resetPair, new LinearLayout.LayoutParams(-1, dp(45)));
+        resetPair.setOnClickListener(v -> {
+            SharedPreferences p = getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE);
+            if (p.getLong("owner_id", 0L) != 0L) {
+                toast("این بات قبلاً به مالک متصل شده است");
+                return;
+            }
+            p.edit().remove("pair_code").remove("pair_expires").apply();
+            if (p.getBoolean("enabled", false)) toast("بات را یک‌بار خاموش و روشن کن تا کد جدید ساخته شود");
+            else toast("حالا بات را روشن کن تا کد اتصال نمایش داده شود");
+            refreshBotUi();
+        });
+        botCard.addView(gap(17));
+        wifiOnly = new android.widget.Switch(this);
+        wifiOnly.setText("دانلودهای بات فقط با Wi-Fi");
+        wifiOnly.setTextSize(13);
+        wifiOnly.setTextColor(INK);
+        wifiOnly.setChecked(getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE)
+            .getBoolean("wifi_only", true));
+        wifiOnly.setOnCheckedChangeListener((btn, checked) -> {
+            getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE).edit()
+                .putBoolean("wifi_only", checked).apply();
+        });
+        botCard.addView(wifiOnly);
+        botCard.addView(gap(13));
+        botCard.addView(label("این مرحله فقط حالت شخصی بات را فعال می‌کند. امکانات کاربران عمومی، VIP و مدیریت کامل بات پایتونی در مرحله بعد منتقل می‌شوند.",
+            12, MUTED, false));
+        botCard.addView(gap(8));
+        botCard.addView(label("برای جلوگیری از خطای Telegram 409، بات را هم‌زمان روی سرور قبلی اجرا نکن. روشن‌ماندن گوشی و محدودیت‌های پس‌زمینه اندروید بر دسترس‌پذیری بات اثر دارند.",
+            12, Color.rgb(146, 97, 41), false));
+        botPanel.addView(botCard);
+        content.addView(botPanel);
+        refreshBotUi();
+
         morePanel = vertical();
         morePanel.setVisibility(View.GONE);
         morePanel.addView(label("بیشتر", 24, INK, true));
@@ -319,45 +421,132 @@ public class MainActivity extends Activity {
 
         LinearLayout nav = horizontal();
         nav.setGravity(Gravity.CENTER);
-        nav.setPadding(dp(14), dp(7), dp(14), dp(7));
+        nav.setPadding(dp(7), dp(7), dp(7), dp(7));
         nav.setBackgroundColor(Color.rgb(233, 236, 251));
-        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(82)));
+        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(84)));
         LinearLayout home = navTab("⌂", "خانه", true);
         LinearLayout downloads = navTab("↓", "دانلودها", false);
+        LinearLayout telegram = navTab("✈", "بات", false);
         LinearLayout more = navTab("•••", "بیشتر", false);
-        nav.addView(home, new LinearLayout.LayoutParams(0, -1, 1));
-        nav.addView(downloads, new LinearLayout.LayoutParams(0, -1, 1));
-        nav.addView(more, new LinearLayout.LayoutParams(0, -1, 1));
-        home.setOnClickListener(v -> selectTab(0, home, downloads, more, scroll));
-        downloads.setOnClickListener(v -> { refreshHistory(); selectTab(1, home, downloads, more, scroll); });
-        more.setOnClickListener(v -> selectTab(2, home, downloads, more, scroll));
+        nav.addView(home, new LinearLayout.LayoutParams(0, -1, 1f));
+        nav.addView(downloads, new LinearLayout.LayoutParams(0, -1, 1f));
+        nav.addView(telegram, new LinearLayout.LayoutParams(0, -1, 1f));
+        nav.addView(more, new LinearLayout.LayoutParams(0, -1, 1f));
+        home.setOnClickListener(v -> selectTab(0, home, downloads, telegram, more, scroll));
+        downloads.setOnClickListener(v -> {
+            refreshHistory();
+            selectTab(1, home, downloads, telegram, more, scroll);
+        });
+        telegram.setOnClickListener(v -> {
+            refreshBotUi();
+            selectTab(2, home, downloads, telegram, more, scroll);
+        });
+        more.setOnClickListener(v -> selectTab(3, home, downloads, telegram, more, scroll));
     }
 
     private LinearLayout navTab(String icon, String title, boolean selected) {
         LinearLayout tab = vertical();
         tab.setGravity(Gravity.CENTER);
-        TextView symbol = label(icon, 25, Color.rgb(34, 42, 69), true);
+        TextView symbol = label(icon, 23, Color.rgb(34, 42, 69), true);
         symbol.setGravity(Gravity.CENTER);
         symbol.setBackground(round(selected ? Color.rgb(209, 219, 251) : Color.TRANSPARENT, 30));
         tab.addView(symbol, new LinearLayout.LayoutParams(-1, dp(42)));
-        TextView name = label(title, 12, Color.rgb(34, 42, 69), selected);
+        TextView name = label(title, 11, Color.rgb(34, 42, 69), selected);
         name.setGravity(Gravity.CENTER);
         tab.addView(name);
         return tab;
     }
-    private void selectTab(int index, LinearLayout home, LinearLayout downloads, LinearLayout more, ScrollView scroll) {
+    private void selectTab(int index, LinearLayout home, LinearLayout downloads,
+                           LinearLayout telegram, LinearLayout more, ScrollView scroll) {
         downloadPanel.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
         historyPanel.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
-        morePanel.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
-        LinearLayout[] tabs = {home, downloads, more};
+        botPanel.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
+        morePanel.setVisibility(index == 3 ? View.VISIBLE : View.GONE);
+        LinearLayout[] tabs = {home, downloads, telegram, more};
         for (int i = 0; i < tabs.length; i++) {
-            TextView symbol = (TextView) tabs[i].getChildAt(0);
-            TextView text = (TextView) tabs[i].getChildAt(1);
+            TextView symbol = (TextView)tabs[i].getChildAt(0);
+            TextView text = (TextView)tabs[i].getChildAt(1);
             symbol.setBackground(round(i == index ? Color.rgb(209, 219, 251) : Color.TRANSPARENT, 30));
             text.setTypeface(Typeface.DEFAULT, i == index ? Typeface.BOLD : Typeface.NORMAL);
         }
         scroll.post(() -> scroll.scrollTo(0, 0));
     }
+
+    private void saveBotToken() {
+        String token = botTokenInput.getText().toString().trim();
+        if (!token.matches("[0-9]{7,12}:[A-Za-z0-9_-]{30,}")) {
+            toast("فرمت توکن معتبر نیست. توکن اصلی BotFather را وارد کن.");
+            return;
+        }
+        try {
+            if (getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE)
+                .getBoolean("enabled", false)) {
+                toast("برای تغییر توکن ابتدا بات را خاموش کن");
+                return;
+            }
+            BotSecrets.save(this, token);
+            botTokenInput.setText("");
+            getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE).edit()
+                .remove("owner_id").remove("pair_code").remove("pair_expires")
+                .remove("update_id").remove("bot_username").apply();
+            toast("توکن بات امن ذخیره شد؛ حالا بات را روشن کن.");
+            refreshBotUi();
+        } catch (Exception e) {
+            toast("ذخیره امن توکن ناموفق بود");
+        }
+    }
+
+    private void startTelegramBot() {
+        if (!BotSecrets.hasToken(this)) {
+            toast("ابتدا توکن بات فعلی را وارد و ذخیره کن");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2109);
+        }
+        try {
+            Intent start = new Intent(this, TelegramBotService.class);
+            start.setAction(TelegramBotService.ACTION_START);
+            startForegroundService(start);
+            toast("ربات روی گوشی در حال راه‌اندازی است");
+            botUiHandler.postDelayed(this::refreshBotUi, 1500);
+        } catch (Exception e) {
+            toast("اجازه اجرای بات در پس‌زمینه داده نشد: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private void refreshBotUi() {
+        if (botStatus == null || botIdentity == null || pairingInfo == null) return;
+        SharedPreferences p = getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE);
+        botIdentity.setText(BotSecrets.hasToken(this)
+            ? "توکن ذخیره شده · " + (p.getString("bot_username", "").isEmpty()
+                ? "در انتظار اتصال" : "@" + p.getString("bot_username", ""))
+            : "هنوز توکن ذخیره نشده");
+        botStatus.setText(p.getString(TelegramBotService.KEY_STATUS, "بات خاموش است"));
+        botStatus.setTextColor(p.getBoolean("enabled", false) ? TEAL : MUTED);
+        long owner = p.getLong("owner_id", 0L);
+        if (owner != 0L) {
+            pairingInfo.setText("✅ مالک تأیید شد. شناسه تلگرام: " + owner);
+            return;
+        }
+        String code = p.getString("pair_code", "");
+        if (!code.isEmpty() && System.currentTimeMillis() < p.getLong("pair_expires", 0L)) {
+            pairingInfo.setText("کد ۱۰ دقیقه‌ای: " + code +
+                "\nدر گفتگوی خصوصی بات خودت بنویس:\n/pair " + code);
+        } else pairingInfo.setText("کد اتصال هنوز آماده نیست. برای دریافت کد بات را روشن کن.");
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        botUiHandler.removeCallbacks(botUiTick);
+        botUiHandler.post(botUiTick);
+    }
+    @Override protected void onPause() {
+        botUiHandler.removeCallbacks(botUiTick);
+        super.onPause();
+    }
+
     private void pasteLink() {
         ClipboardManager cm = (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = cm == null ? null : cm.getPrimaryClip();
