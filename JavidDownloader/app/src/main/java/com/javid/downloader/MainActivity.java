@@ -312,7 +312,7 @@ public class MainActivity extends Activity {
         settings.addView(label("پلتفرم‌های پشتیبانی‌شده", 15, INK, true));
         settings.addView(label("YouTube · Instagram · Facebook · TikTok · X\nPinterest · Vimeo · Reddit · Dailymotion · Twitch", 12, MUTED, false));
         settings.addView(gap(16));
-        settings.addView(label("Javid Downloader 1.3.0", 13, INK, true));
+        settings.addView(label("Javid Downloader 1.3.1", 13, INK, true));
         settings.addView(label("بدون حساب کاربری و بدون سرور اختصاصی", 12, MUTED, false));
         morePanel.addView(settings);
         content.addView(morePanel);
