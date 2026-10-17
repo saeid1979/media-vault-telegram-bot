@@ -628,10 +628,11 @@ public class MainActivity extends Activity {
     }
 
     private String extractLink(String input) {
-        Matcher matcher = Pattern.compile("https?://[^\\\\s<>\\\\\"]+", Pattern.CASE_INSENSITIVE)
+        Matcher matcher = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE)
             .matcher(input.trim());
         String candidate = matcher.find() ? matcher.group() : input.trim();
-        return candidate.replaceAll("[\\\\p{Punct}&&[^/=:?&%._~#-]]+$", "");
+        // Share-sheet captions often end the copied URL with punctuation.
+        return candidate.replaceAll("[),;]+$", "");
     }
 
     private String platformName(String url) {
