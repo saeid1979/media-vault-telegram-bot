@@ -38,6 +38,6 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v1.1.0-android-arm64-debug
+          name: JavidDownloader-v1.2.0-android-arm64-debug
           path: JavidDownloader/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
