@@ -14,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      JAVID_KEYSTORE_B64: ${{ secrets.JAVID_KEYSTORE_B64 }}
+      JAVID_SIGN_PASSWORD: ${{ secrets.JAVID_SIGN_PASSWORD }}
     defaults:
       run:
         working-directory: JavidDownloader
@@ -34,10 +37,28 @@ jobs:
         with:
           gradle-version: '8.9'
       - name: Build APK
-        run: gradle --no-daemon :app:assembleDebug
-      - name: Upload installable APK
+        run: |
+          mkdir -p outputs
+          if [ -n "$JAVID_KEYSTORE_B64" ] && [ -n "$JAVID_SIGN_PASSWORD" ]; then
+            printf '%s' "$JAVID_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/javid-release.jks"
+            chmod 600 "$RUNNER_TEMP/javid-release.jks"
+            export JAVID_SIGNING_STORE_FILE="$RUNNER_TEMP/javid-release.jks"
+            gradle --no-daemon :app:assembleRelease
+            cp app/build/outputs/apk/release/app-release.apk outputs/JavidDownloader-v1.2.2-STABLE-RELEASE.apk
+          else
+            echo "::warning::Configure GitHub Actions secrets JAVID_KEYSTORE_B64 and JAVID_SIGN_PASSWORD to create stable update APKs"
+            gradle --no-daemon :app:assembleDebug
+            cp app/build/outputs/apk/debug/app-debug.apk outputs/JavidDownloader-v1.2.2-TEMPORARY-DEBUG.apk
+          fi
+      - name: Upload APK build
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v1.2.1-android-arm64-debug
-          path: JavidDownloader/app/build/outputs/apk/debug/app-debug.apk
+          name: JavidDownloader-v1.2.2-build
+          path: JavidDownloader/outputs/*.apk
+          if-no-files-found: error
+      - name: Provide Android APK signer toolkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-tools-apksigner-35
+          path: /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar
           if-no-files-found: error
