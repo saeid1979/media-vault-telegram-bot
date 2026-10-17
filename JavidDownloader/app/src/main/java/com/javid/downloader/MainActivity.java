@@ -454,7 +454,7 @@ public class MainActivity extends Activity {
                     req.addOption("--merge-output-format", "mp4");
                 }
                 final long[] last = {0};
-                YoutubeDL.getInstance().execute(req, processId, new Function3<Float, Long, String, Unit>() {
+                Function3<Float, Long, String, Unit> onProgress = new Function3<Float, Long, String, Unit>() {
                     @Override public Unit invoke(Float p, Long eta, String output) {
                         long now = System.currentTimeMillis();
                         if (now - last[0] > 280 || p >= 100f) {
@@ -467,7 +467,36 @@ public class MainActivity extends Activity {
                         }
                         return Unit.INSTANCE;
                     }
-                });
+                };
+                try {
+                    YoutubeDL.getInstance().execute(req, processId, onProgress);
+                } catch (Exception firstError) {
+                    String failure = firstError.getMessage() == null ? "" :
+                        firstError.getMessage().toLowerCase(Locale.ROOT);
+                    // The host may omit numerical height metadata for the user's
+                    // selected format. Retry once using the best available format.
+                    // Do not retry authentication, private, restricted, or DRM errors.
+                    boolean unavailable = failure.contains("requested format is not available") ||
+                        failure.contains("requested format not available");
+                    if (chosen == 5 || chosen == 0 || !unavailable) throw firstError;
+                    runOnUiThread(() -> {
+                        progress.setProgress(0);
+                        setStatus("کیفیت انتخابی در این ویدیو موجود نیست؛ تلاش با کیفیت موجود...", false);
+                        detail.setText("ممکن است کیفیت فایل نهایی با انتخاب شما متفاوت باشد.");
+                    });
+                    File[] partialFiles = job.listFiles();
+                    if (partialFiles != null) {
+                        for (File partial : partialFiles) deleteRecursive(partial);
+                    }
+                    YoutubeDLRequest fallback = new YoutubeDLRequest(link);
+                    fallback.addOption("--no-playlist");
+                    fallback.addOption("--no-mtime");
+                    fallback.addOption("-o", new File(job, "%(title).130B [%(id)s].%(ext)s").getAbsolutePath());
+                    fallback.addOption("-f", "bv*+ba/b");
+                    fallback.addOption("--merge-output-format", "mp4");
+                    last[0] = 0;
+                    YoutubeDL.getInstance().execute(fallback, processId, onProgress);
+                }
                 File[] saved = job.listFiles((dir, name) -> !name.endsWith(".part") &&
                     !name.endsWith(".ytdl") && !name.endsWith(".json") &&
                     !name.endsWith(".webp") && !name.endsWith(".description"));
