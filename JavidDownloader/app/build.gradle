@@ -1,5 +1,11 @@
 plugins { id 'com.android.application' }
 
+// Sign release builds ONLY with the permanent key kept in GitHub Actions Secrets.
+// Never commit private keystores or passwords to source control.
+def stableKeyFile = System.getenv('JAVID_SIGNING_STORE_FILE')
+def stableKeyPassword = System.getenv('JAVID_SIGN_PASSWORD')
+def stableKeyAvailable = stableKeyFile && stableKeyPassword && file(stableKeyFile).isFile()
+
 android {
     namespace 'com.javid.downloader'
     compileSdk 35
@@ -8,9 +14,27 @@ android {
         applicationId 'com.javid.downloader'
         minSdk 29
         targetSdk 35
-        versionCode 6
-        versionName '1.2.1'
+        versionCode 7
+        versionName '1.2.2'
         ndk { abiFilters 'arm64-v8a' }
+    }
+    signingConfigs {
+        stableRelease {
+            if (stableKeyAvailable) {
+                storeFile file(stableKeyFile)
+                storePassword stableKeyPassword
+                keyAlias 'javid-release'
+                keyPassword stableKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (stableKeyAvailable) {
+                signingConfig signingConfigs.stableRelease
+            }
+            minifyEnabled false
+        }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
