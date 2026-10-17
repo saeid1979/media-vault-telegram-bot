@@ -8,6 +8,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -21,6 +23,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -40,6 +44,9 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.ByteArrayOutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.SimpleDateFormat;
@@ -65,11 +72,13 @@ public class MainActivity extends Activity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     private EditText linkBox;
-    private TextView state, detail, sourceInfo;
+    private TextView state, detail, sourceInfo, previewTitle, previewMeta, previewDuration;
     private ProgressBar progress;
-    private Button startButton, checkButton, cancelButton, updateButton;
+    private Button startButton, checkButton, cancelButton, updateButton, videoButton, audioButton;
     private Spinner quality;
-    private LinearLayout downloadPanel, historyPanel, historyItems;
+    private LinearLayout downloadPanel, historyPanel, morePanel, historyItems, previewPanel;
+    private ImageView previewImage;
+    private volatile String previewUrl = "";
     private volatile boolean engineReady = false;
     private volatile boolean busy = false;
     private volatile boolean isDownloading = false;
@@ -100,11 +109,13 @@ public class MainActivity extends Activity {
         });
     }
 
+
     private void buildUi() {
-        // Persian-first visual language: expressive navy hero, muted backgrounds,
-        // generous spacing, a single strong call to action, and an anchored nav.
+        // Clean media-card design inspired by the reference, with original branding.
+        final int LAVENDER = Color.rgb(229, 234, 252);
+        final int INK = Color.rgb(31, 39, 62);
         LinearLayout root = vertical();
-        root.setBackgroundColor(PALE);
+        root.setBackgroundColor(Color.rgb(251, 251, 255));
         setContentView(root);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int top, bottom;
@@ -118,256 +129,269 @@ public class MainActivity extends Activity {
             view.setPadding(0, top, 0, bottom);
             return insets;
         });
-
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-
         LinearLayout content = vertical();
-        content.setPadding(dp(18), dp(20), dp(18), dp(29));
+        content.setPadding(dp(18), dp(12), dp(18), dp(25));
         content.setFocusableInTouchMode(true);
         scroll.addView(content);
         content.requestFocus();
 
-        // Identity / hero header
-        LinearLayout hero = vertical();
-        hero.setPadding(dp(21), dp(22), dp(21), dp(23));
-        hero.setBackground(gradient(Color.rgb(10, 36, 51), Color.rgb(19, 91, 101), 26));
-        hero.setElevation(dp(5));
-
-        LinearLayout brand = horizontal();
-        brand.setGravity(Gravity.CENTER_VERTICAL);
-        TextView emblem = label("↓", 28, Color.rgb(251, 201, 104), true);
-        emblem.setGravity(Gravity.CENTER);
-        emblem.setBackground(outline(Color.rgb(27, 81, 92), Color.rgb(76, 135, 139), 15));
-        brand.addView(emblem, new LinearLayout.LayoutParams(dp(55), dp(55)));
-        LinearLayout brandText = vertical();
-        brandText.addView(label("JAVID  DOWNLOADER", 15, Color.WHITE, true));
-        brandText.addView(gap(3));
-        brandText.addView(label("جاوید دانلودر", 18, Color.WHITE, true));
-        LinearLayout.LayoutParams bt = new LinearLayout.LayoutParams(0, -2, 1f);
-        bt.setMargins(dp(12), 0, 0, 0);
-        brand.addView(brandText, bt);
-        hero.addView(brand);
-
-        hero.addView(gap(22));
-        hero.addView(label("لینک بده، فایل بگیر.", 23, Color.WHITE, true));
-        hero.addView(gap(7));
-        hero.addView(label("از ۱۰ پلتفرم مختلف، فایل‌های مجاز را دریافت کن", 13,
-            Color.rgb(206, 230, 232), false));
-        hero.addView(gap(17));
-        LinearLayout tags = horizontal();
-        tags.addView(badge("۱۰ پلتفرم", Color.rgb(255, 207, 119), NAVY));
-        tags.addView(gapHorizontal(8));
-        tags.addView(badge("تشخیص خودکار لینک", Color.rgb(31, 96, 105), Color.WHITE));
-        tags.addView(gapHorizontal(8));
-        tags.addView(badge("نسخه ۱.۲", Color.rgb(31, 96, 105), Color.WHITE));
-        hero.addView(tags);
-        content.addView(hero);
-        content.addView(gap(14));
-        LinearLayout sourcesCard = vertical();
-        sourcesCard.setPadding(dp(15), dp(13), dp(15), dp(13));
-        sourcesCard.setBackground(round(Color.WHITE, 17));
-        sourcesCard.addView(label("پلتفرم‌های قابل بررسی", 13, TEXT, true));
-        sourcesCard.addView(gap(7));
-        TextView sourceList = label("YouTube  •  Instagram  •  Facebook  •  TikTok  •  X\\n"
-            + "Pinterest  •  Vimeo  •  Reddit  •  Dailymotion  •  Twitch", 11, MUTED, false);
-        sourceList.setTextDirection(View.TEXT_DIRECTION_LTR);
-        sourceList.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        sourcesCard.addView(sourceList);
-        content.addView(sourcesCard);
-        content.addView(gap(23));
-
-        LinearLayout sectionHeading = horizontal();
-        sectionHeading.setGravity(Gravity.CENTER_VERTICAL);
-        sectionHeading.addView(label("دانلود جدید", 20, TEXT, true),
-            new LinearLayout.LayoutParams(0, -2, 1f));
-        sectionHeading.addView(badge("لینک مستقیم", Color.rgb(227, 243, 241), TEAL));
-        content.addView(sectionHeading);
-        content.addView(gap(13));
+        LinearLayout header = horizontal();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
+        header.addView(label("dl", 26, INK, true));
+        header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        header.addView(badge("v1.3", LAVENDER, INK));
+        content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
-        LinearLayout card = vertical();
-        card.setPadding(dp(17), dp(20), dp(17), dp(20));
-        card.setBackground(round(Color.WHITE, 22));
-        card.setElevation(dp(3));
-
-        card.addView(label("آدرس ویدیو", 15, TEXT, true));
-        card.addView(gap(5));
-        card.addView(label("لینک یکی از ۱۰ پلتفرم پشتیبانی‌شده را وارد کن", 12, MUTED, false));
-        card.addView(gap(13));
-
+        content.addView(downloadPanel);
+        LinearLayout search = horizontal();
+        search.setGravity(Gravity.CENTER_VERTICAL);
+        search.setPadding(dp(7), dp(4), dp(7), dp(4));
+        search.setBackground(round(LAVENDER, 38));
+        checkButton = styledButton("⌕", Color.TRANSPARENT, INK, 30, 28);
+        checkButton.setContentDescription("جستجو و نمایش پیش‌نمایش");
+        search.addView(checkButton, new LinearLayout.LayoutParams(dp(52), dp(55)));
         linkBox = new EditText(this);
-        linkBox.setSingleLine(false);
-        linkBox.setMinLines(2);
-        linkBox.setMaxLines(3);
-        linkBox.setTextSize(14);
-        linkBox.setTextColor(TEXT);
-        linkBox.setHintTextColor(MUTED);
-        linkBox.setHint("https://www.tiktok.com/...\nیا لینک شبکه‌های دیگر...");
+        linkBox.setSingleLine(true);
+        linkBox.setTextSize(15);
+        linkBox.setTextColor(INK);
+        linkBox.setHintTextColor(Color.rgb(109, 119, 145));
+        linkBox.setHint("جستجو یا وارد کردن لینک");
         linkBox.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        linkBox.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        linkBox.setPadding(dp(14), dp(12), dp(14), dp(12));
-        linkBox.setBackground(outline(Color.rgb(249, 251, 252), Color.rgb(220, 232, 235), 13));
-        card.addView(linkBox, new LinearLayout.LayoutParams(-1, dp(90)));
-        card.addView(gap(10));
-        sourceInfo = label("شبکه را پس از وارد کردن لینک تشخیص می‌دهم.", 12, MUTED, false);
-        sourceInfo.setPadding(dp(9), dp(8), dp(9), dp(8));
-        sourceInfo.setBackground(round(Color.rgb(244, 247, 249), 10));
-        card.addView(sourceInfo);
+        linkBox.setGravity(Gravity.CENTER_VERTICAL);
+        linkBox.setBackgroundColor(Color.TRANSPARENT);
+        linkBox.setPadding(dp(3), 0, dp(3), 0);
+        search.addView(linkBox, new LinearLayout.LayoutParams(0, dp(55), 1));
+        Button paste = styledButton("⋮", Color.TRANSPARENT, INK, 28, 28);
+        paste.setContentDescription("چسباندن لینک");
+        search.addView(paste, new LinearLayout.LayoutParams(dp(40), dp(55)));
+        downloadPanel.addView(search);
+        checkButton.setOnClickListener(v -> inspect());
+        paste.setOnClickListener(v -> pasteLink());
+        linkBox.setOnEditorActionListener((v, actionId, event) -> { inspect(); return true; });
+        sourceInfo = label("لینک یک ویدیوی مجاز را وارد و بررسی کن.", 12, MUTED, false);
+        downloadPanel.addView(sourceInfo, margin(0, 11, 0, 4));
         linkBox.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
-                showDetectedPlatform(text.toString());
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                showDetectedPlatform(s.toString());
+                if (!extractLink(s.toString()).equals(previewUrl) && previewPanel != null)
+                    previewPanel.setVisibility(View.GONE);
             }
-            @Override public void afterTextChanged(Editable text) { }
+            @Override public void afterTextChanged(Editable s) { }
         });
-        card.addView(gap(12));
+        downloadPanel.addView(gap(21));
 
-        Button paste = styledButton("⎘  چسباندن لینک", Color.rgb(232, 245, 243),
-            Color.rgb(0, 126, 110), 13, 12);
-        card.addView(paste, new LinearLayout.LayoutParams(-1, dp(45)));
-        paste.setOnClickListener(v -> {
-            ClipboardManager cm = (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
-            ClipData clip = cm == null ? null : cm.getPrimaryClip();
-            if (clip != null && clip.getItemCount() > 0) {
-                linkBox.setText(String.valueOf(clip.getItemAt(0).coerceToText(this)));
-            } else { toast("متنی در کلیپ‌بورد نیست"); }
-        });
+        // Real preview card populated from the yt-dlp metadata of the input link.
+        previewPanel = vertical();
+        previewPanel.setVisibility(View.GONE);
+        previewPanel.setBackground(round(Color.WHITE, 23));
+        previewPanel.setElevation(dp(3));
+        FrameLayout media = new FrameLayout(this);
+        media.setBackground(round(Color.rgb(38, 48, 81), 19));
+        media.setClipToOutline(true);
+        previewImage = new ImageView(this);
+        previewImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        previewImage.setBackground(gradient(Color.rgb(44, 58, 96), Color.rgb(18, 26, 47), 19));
+        media.addView(previewImage, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout shade = vertical();
+        shade.setPadding(dp(14), dp(12), dp(14), dp(12));
+        shade.setBackgroundColor(Color.argb(195, 19, 23, 41));
+        previewTitle = label("در حال بررسی ویدیو...", 16, Color.WHITE, true);
+        previewTitle.setMaxLines(2);
+        previewTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        shade.addView(previewTitle);
+        previewMeta = label("", 12, Color.rgb(232, 235, 247), false);
+        shade.addView(previewMeta, margin(0, 5, 0, 0));
+        media.addView(shade, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        previewDuration = badge("—", Color.argb(207, 30, 35, 55), Color.WHITE);
+        FrameLayout.LayoutParams dur = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        dur.setMargins(dp(12), 0, dp(12), dp(12));
+        media.addView(previewDuration, dur);
+        previewPanel.addView(media, new LinearLayout.LayoutParams(-1, dp(212)));
+        LinearLayout actions = horizontal();
+        actions.setPadding(dp(12), dp(11), dp(12), dp(12));
+        videoButton = styledButton("▣  ویدیو", LAVENDER, INK, 15, 14);
+        audioButton = styledButton("♫  MP3", LAVENDER, INK, 15, 14);
+        actions.addView(videoButton, new LinearLayout.LayoutParams(0, dp(55), 1));
+        actions.addView(gapHorizontal(10));
+        actions.addView(audioButton, new LinearLayout.LayoutParams(0, dp(55), 1));
+        previewPanel.addView(actions);
+        videoButton.setOnClickListener(v -> download(quality.getSelectedItemPosition() == 5 ? 0 : quality.getSelectedItemPosition()));
+        audioButton.setOnClickListener(v -> download(5));
+        downloadPanel.addView(previewPanel);
+        downloadPanel.addView(gap(14));
 
-        card.addView(gap(22));
-        card.addView(label("کیفیت خروجی", 15, TEXT, true));
-        card.addView(gap(9));
-        LinearLayout qualityWrap = horizontal();
-        qualityWrap.setPadding(dp(12), 0, dp(12), 0);
-        qualityWrap.setGravity(Gravity.CENTER_VERTICAL);
-        qualityWrap.setBackground(outline(Color.rgb(249, 251, 252), Color.rgb(220, 232, 235), 13));
-        TextView resolutionIcon = label("▣", 22, TEAL, true);
-        qualityWrap.addView(resolutionIcon);
+        LinearLayout formatCard = vertical();
+        formatCard.setPadding(dp(16), dp(15), dp(16), dp(17));
+        formatCard.setBackground(outline(Color.WHITE, Color.rgb(231, 234, 243), 19));
+        formatCard.addView(label("کیفیت ویدیو", 15, INK, true));
         quality = new Spinner(this);
         String[] options = {"بهترین کیفیت", "1080p", "720p", "480p", "360p", "فقط صدا (MP3)"};
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, options);
-        quality.setAdapter(adapter);
-        qualityWrap.addView(quality, new LinearLayout.LayoutParams(0, dp(54), 1f));
-        card.addView(qualityWrap);
-
-        card.addView(gap(18));
-        LinearLayout utilities = horizontal();
-        checkButton = styledButton("بررسی لینک", Color.rgb(244, 247, 250), NAVY, 12, 12);
-        updateButton = styledButton("↻  به‌روزرسانی موتور", Color.rgb(244, 247, 250), NAVY, 12, 12);
-        utilities.addView(checkButton, new LinearLayout.LayoutParams(0, dp(47), 1f));
-        utilities.addView(gapHorizontal(8));
-        utilities.addView(updateButton, new LinearLayout.LayoutParams(0, dp(47), 1f));
-        card.addView(utilities);
-        checkButton.setOnClickListener(v -> inspect());
-        updateButton.setOnClickListener(v -> updateEngine(false));
-
-        card.addView(gap(14));
-        startButton = styledButton("↓    شروع دانلود", TEAL, Color.WHITE, 17, 15);
-        startButton.setBackground(gradient(Color.rgb(4, 163, 143), Color.rgb(0, 128, 118), 15));
-        startButton.setElevation(dp(2));
-        card.addView(startButton, new LinearLayout.LayoutParams(-1, dp(56)));
-        startButton.setOnClickListener(v -> download());
-
-        cancelButton = styledButton("توقف دانلود", Color.rgb(255, 241, 239),
-            Color.rgb(182, 61, 57), 14, 12);
-        cancelButton.setVisibility(View.GONE);
-        card.addView(cancelButton, margin(0, 10, 0, 0));
-        cancelButton.setOnClickListener(v -> {
-            if (isDownloading) {
-                YoutubeDL.getInstance().destroyProcessById(processId);
-                setStatus("درخواست توقف ارسال شد", true);
+        quality.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, options));
+        quality.setSelection(getPreferences(MODE_PRIVATE).getInt("quality", 0));
+        quality.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View v, int pos, long id) {
+                getPreferences(MODE_PRIVATE).edit().putInt("quality", pos).apply();
             }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
         });
-        downloadPanel.addView(card);
+        formatCard.addView(quality, new LinearLayout.LayoutParams(-1, dp(50)));
+        startButton = styledButton("↓   شروع دانلود", NAVY, Color.WHITE, 16, 14);
+        formatCard.addView(startButton, new LinearLayout.LayoutParams(-1, dp(49)));
+        startButton.setOnClickListener(v -> download());
+        downloadPanel.addView(formatCard);
+        downloadPanel.addView(gap(16));
 
-        downloadPanel.addView(gap(17));
-        LinearLayout statusCard = vertical();
-        statusCard.setPadding(dp(17), dp(17), dp(17), dp(18));
-        statusCard.setBackground(round(Color.WHITE, 19));
-        statusCard.setElevation(dp(1));
-        LinearLayout statusHeading = horizontal();
-        statusHeading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView smallDot = label("●", 15, TEAL, true);
-        statusHeading.addView(smallDot);
-        TextView statusTitle = label("  وضعیت دانلود", 16, TEXT, true);
-        statusHeading.addView(statusTitle);
-        statusCard.addView(statusHeading);
-        statusCard.addView(gap(12));
-        state = label("در حال آماده‌سازی موتور دانلود...", 13, TEAL, true);
-        statusCard.addView(state);
-        statusCard.addView(gap(12));
+        LinearLayout status = vertical();
+        status.setBackground(round(Color.WHITE, 19));
+        status.setPadding(dp(15), dp(15), dp(15), dp(15));
+        status.addView(label("وضعیت دانلود", 16, INK, true));
+        state = label("آماده‌سازی موتور دانلود...", 13, TEAL, true);
+        status.addView(state, margin(0, 9, 0, 9));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
-        progress.setProgress(0);
         progress.setProgressTintList(ColorStateList.valueOf(TEAL));
-        progress.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(228, 237, 239)));
-        statusCard.addView(progress, new LinearLayout.LayoutParams(-1, dp(7)));
-        detail = label("بعد از وارد کردن لینک، روی شروع دانلود بزن.", 12, MUTED, false);
-        statusCard.addView(detail, margin(0, 13, 0, 0));
-        downloadPanel.addView(statusCard);
-        downloadPanel.addView(gap(15));
-
-        LinearLayout hintCard = horizontal();
-        hintCard.setGravity(Gravity.CENTER_VERTICAL);
-        hintCard.setPadding(dp(13), dp(14), dp(13), dp(14));
-        hintCard.setBackground(round(Color.rgb(231, 242, 245), 16));
-        hintCard.addView(label("ⓘ", 21, Color.rgb(35, 112, 127), true));
-        TextView hint = label("دانلود فقط برای محتوای مجاز و در دسترس عمومی است. لینک‌های خصوصی، حفاظت‌شده یا محدود ممکن است کار نکنند.",
-            12, Color.rgb(74, 103, 114), false);
-        LinearLayout.LayoutParams hintParam = new LinearLayout.LayoutParams(0, -2, 1f);
-        hintParam.setMargins(dp(9), 0, 0, 0);
-        hintCard.addView(hint, hintParam);
-        downloadPanel.addView(hintCard);
-        content.addView(downloadPanel);
+        status.addView(progress, new LinearLayout.LayoutParams(-1, dp(7)));
+        detail = label("عنوان و تصویر ویدیو بعد از بررسی لینک نمایش داده می‌شود.", 12, MUTED, false);
+        status.addView(detail, margin(0, 10, 0, 0));
+        cancelButton = styledButton("توقف دانلود", Color.rgb(255, 237, 237), Color.rgb(167, 60, 60), 13, 12);
+        cancelButton.setVisibility(View.GONE);
+        status.addView(cancelButton, margin(0, 11, 0, 0));
+        cancelButton.setOnClickListener(v -> { if (isDownloading) YoutubeDL.getInstance().destroyProcessById(processId); });
+        downloadPanel.addView(status);
+        downloadPanel.addView(label("فقط محتوای مجاز و قابل دریافت را دانلود کن.", 12, MUTED, false), margin(0, 16, 0, 0));
 
         historyPanel = vertical();
         historyPanel.setVisibility(View.GONE);
-        historyPanel.addView(label("دانلودهای من", 21, TEXT, true));
-        historyPanel.addView(gap(5));
-        historyPanel.addView(label("فایل‌های ذخیره‌شده روی گوشی", 12, MUTED, false));
+        historyPanel.addView(label("دانلودها", 24, INK, true));
         historyPanel.addView(gap(15));
-        LinearLayout histCard = vertical();
-        histCard.setPadding(dp(14), dp(17), dp(14), dp(14));
-        histCard.setBackground(round(Color.WHITE, 21));
-        histCard.setElevation(dp(2));
+        LinearLayout past = vertical();
+        past.setBackground(round(Color.WHITE, 20));
+        past.setPadding(dp(13), dp(13), dp(13), dp(13));
         historyItems = vertical();
-        histCard.addView(historyItems);
-        historyPanel.addView(histCard);
+        past.addView(historyItems);
+        historyPanel.addView(past);
         content.addView(historyPanel);
 
-        // Persistent bottom navigation, with correct Android window inset padding.
-        LinearLayout bottom = horizontal();
-        bottom.setPadding(dp(18), dp(11), dp(18), dp(13));
-        bottom.setGravity(Gravity.CENTER_VERTICAL);
-        bottom.setBackgroundColor(Color.WHITE);
-        bottom.setElevation(dp(12));
-        root.addView(bottom, new LinearLayout.LayoutParams(-1, -2));
-        Button downTab = styledButton("↓   دانلود", NAVY, Color.WHITE, 15, 13);
-        Button histTab = styledButton("◷   تاریخچه", Color.rgb(241, 246, 247), NAVY, 15, 13);
-        bottom.addView(downTab, new LinearLayout.LayoutParams(0, dp(51), 1f));
-        bottom.addView(gapHorizontal(10));
-        bottom.addView(histTab, new LinearLayout.LayoutParams(0, dp(51), 1f));
-        downTab.setOnClickListener(v -> {
-            downloadPanel.setVisibility(View.VISIBLE);
-            historyPanel.setVisibility(View.GONE);
-            downTab.setBackground(round(NAVY, 15));
-            downTab.setTextColor(Color.WHITE);
-            histTab.setBackground(round(Color.rgb(241, 246, 247), 15));
-            histTab.setTextColor(NAVY);
-            scroll.smoothScrollTo(0, 0);
-        });
-        histTab.setOnClickListener(v -> {
-            refreshHistory();
-            downloadPanel.setVisibility(View.GONE);
-            historyPanel.setVisibility(View.VISIBLE);
-            histTab.setBackground(round(NAVY, 15));
-            histTab.setTextColor(Color.WHITE);
-            downTab.setBackground(round(Color.rgb(241, 246, 247), 15));
-            downTab.setTextColor(NAVY);
-            scroll.smoothScrollTo(0, 0);
+        morePanel = vertical();
+        morePanel.setVisibility(View.GONE);
+        morePanel.addView(label("بیشتر", 24, INK, true));
+        morePanel.addView(gap(15));
+        LinearLayout settings = vertical();
+        settings.setBackground(round(Color.WHITE, 20));
+        settings.setPadding(dp(17), dp(17), dp(17), dp(17));
+        settings.addView(label("تنظیمات", 18, INK, true));
+        settings.addView(gap(12));
+        updateButton = styledButton("↻  به‌روزرسانی موتور دانلود", LAVENDER, INK, 13, 13);
+        settings.addView(updateButton, new LinearLayout.LayoutParams(-1, dp(52)));
+        updateButton.setOnClickListener(v -> updateEngine(false));
+        settings.addView(gap(17));
+        settings.addView(label("محل ذخیره فایل‌ها", 15, INK, true));
+        settings.addView(label("Downloads / JavidDownloader", 13, MUTED, false));
+        settings.addView(gap(16));
+        settings.addView(label("پلتفرم‌های پشتیبانی‌شده", 15, INK, true));
+        settings.addView(label("YouTube · Instagram · Facebook · TikTok · X\nPinterest · Vimeo · Reddit · Dailymotion · Twitch", 12, MUTED, false));
+        settings.addView(gap(16));
+        settings.addView(label("Javid Downloader 1.3.0", 13, INK, true));
+        settings.addView(label("بدون حساب کاربری و بدون سرور اختصاصی", 12, MUTED, false));
+        morePanel.addView(settings);
+        content.addView(morePanel);
+
+        LinearLayout nav = horizontal();
+        nav.setGravity(Gravity.CENTER);
+        nav.setPadding(dp(14), dp(7), dp(14), dp(7));
+        nav.setBackgroundColor(Color.rgb(233, 236, 251));
+        root.addView(nav, new LinearLayout.LayoutParams(-1, dp(82)));
+        LinearLayout home = navTab("⌂", "خانه", true);
+        LinearLayout downloads = navTab("↓", "دانلودها", false);
+        LinearLayout more = navTab("•••", "بیشتر", false);
+        nav.addView(home, new LinearLayout.LayoutParams(0, -1, 1));
+        nav.addView(downloads, new LinearLayout.LayoutParams(0, -1, 1));
+        nav.addView(more, new LinearLayout.LayoutParams(0, -1, 1));
+        home.setOnClickListener(v -> selectTab(0, home, downloads, more, scroll));
+        downloads.setOnClickListener(v -> { refreshHistory(); selectTab(1, home, downloads, more, scroll); });
+        more.setOnClickListener(v -> selectTab(2, home, downloads, more, scroll));
+    }
+
+    private LinearLayout navTab(String icon, String title, boolean selected) {
+        LinearLayout tab = vertical();
+        tab.setGravity(Gravity.CENTER);
+        TextView symbol = label(icon, 25, Color.rgb(34, 42, 69), true);
+        symbol.setGravity(Gravity.CENTER);
+        symbol.setBackground(round(selected ? Color.rgb(209, 219, 251) : Color.TRANSPARENT, 30));
+        tab.addView(symbol, new LinearLayout.LayoutParams(-1, dp(42)));
+        TextView name = label(title, 12, Color.rgb(34, 42, 69), selected);
+        name.setGravity(Gravity.CENTER);
+        tab.addView(name);
+        return tab;
+    }
+    private void selectTab(int index, LinearLayout home, LinearLayout downloads, LinearLayout more, ScrollView scroll) {
+        downloadPanel.setVisibility(index == 0 ? View.VISIBLE : View.GONE);
+        historyPanel.setVisibility(index == 1 ? View.VISIBLE : View.GONE);
+        morePanel.setVisibility(index == 2 ? View.VISIBLE : View.GONE);
+        LinearLayout[] tabs = {home, downloads, more};
+        for (int i = 0; i < tabs.length; i++) {
+            TextView symbol = (TextView) tabs[i].getChildAt(0);
+            TextView text = (TextView) tabs[i].getChildAt(1);
+            symbol.setBackground(round(i == index ? Color.rgb(209, 219, 251) : Color.TRANSPARENT, 30));
+            text.setTypeface(Typeface.DEFAULT, i == index ? Typeface.BOLD : Typeface.NORMAL);
+        }
+        scroll.post(() -> scroll.scrollTo(0, 0));
+    }
+    private void pasteLink() {
+        ClipboardManager cm = (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = cm == null ? null : cm.getPrimaryClip();
+        if (clip != null && clip.getItemCount() > 0) {
+            linkBox.setText(String.valueOf(clip.getItemAt(0).coerceToText(this)));
+            inspect();
+        } else toast("لینکی در کلیپ‌بورد نیست");
+    }
+
+    private String durationText(int seconds) {
+        if (seconds <= 0) return "—";
+        int m = seconds / 60, rem = seconds % 60;
+        if (m >= 60) return String.format(Locale.US, "%d:%02d:%02d", m / 60, m % 60, rem);
+        return String.format(Locale.US, "%d:%02d", m, rem);
+    }
+
+    private void loadThumbnail(String url, String expectedLink) {
+        if (url == null || !url.startsWith("https://")) return;
+        executor.execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection)new URL(url).openConnection();
+                conn.setConnectTimeout(9000);
+                conn.setReadTimeout(10000);
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0");
+                if (conn.getResponseCode() != 200 || conn.getContentLength() > 4_000_000) return;
+                Bitmap bitmap;
+                try (InputStream in = conn.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                    byte[] bytes = new byte[8192];
+                    int n, count = 0;
+                    while ((n = in.read(bytes)) != -1) {
+                        count += n;
+                        if (count > 4_000_000) return;
+                        out.write(bytes, 0, n);
+                    }
+                    byte[] data = out.toByteArray();
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inSampleSize = 2;
+                    bitmap = BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+                }
+                if (bitmap != null) runOnUiThread(() -> {
+                    if (expectedLink.equals(previewUrl)) previewImage.setImageBitmap(bitmap);
+                });
+            } catch (Exception ignored) {
+                // Some providers intentionally block remote thumbnail requests.
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         });
     }
 
