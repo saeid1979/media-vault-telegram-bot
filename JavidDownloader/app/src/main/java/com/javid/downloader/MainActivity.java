@@ -30,7 +30,7 @@ import android.widget.Toast;
 import com.yausername.youtubedl_android.YoutubeDL;
 import com.yausername.youtubedl_android.YoutubeDLRequest;
 import com.yausername.youtubedl_android.YoutubeDLException;
-import com.yausername.youtubedl_android.ffmpeg.FFmpeg;
+import com.yausername.ffmpeg.FFmpeg;
 import com.yausername.youtubedl_android.mapper.VideoInfo;
 
 import org.json.JSONArray;
