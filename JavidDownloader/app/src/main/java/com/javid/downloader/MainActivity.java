@@ -15,6 +15,8 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -63,7 +65,7 @@ public class MainActivity extends Activity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     private EditText linkBox;
-    private TextView state, detail;
+    private TextView state, detail, sourceInfo;
     private ProgressBar progress;
     private Button startButton, checkButton, cancelButton, updateButton;
     private Spinner quality;
@@ -153,18 +155,30 @@ public class MainActivity extends Activity {
         hero.addView(gap(22));
         hero.addView(label("لینک بده، فایل بگیر.", 23, Color.WHITE, true));
         hero.addView(gap(7));
-        hero.addView(label("ویدیو و موسیقی را با کیفیت دلخواه ذخیره کن", 13,
+        hero.addView(label("از ۱۰ پلتفرم مختلف، فایل‌های مجاز را دریافت کن", 13,
             Color.rgb(206, 230, 232), false));
         hero.addView(gap(17));
         LinearLayout tags = horizontal();
-        tags.addView(badge("▶  YouTube", Color.rgb(31, 96, 105), Color.WHITE));
+        tags.addView(badge("۱۰ پلتفرم", Color.rgb(255, 207, 119), NAVY));
         tags.addView(gapHorizontal(8));
-        tags.addView(badge("◎  Instagram", Color.rgb(31, 96, 105), Color.WHITE));
+        tags.addView(badge("تشخیص خودکار لینک", Color.rgb(31, 96, 105), Color.WHITE));
         tags.addView(gapHorizontal(8));
-        tags.addView(badge("نسخه ۱.۱", Color.rgb(255, 207, 119), NAVY));
+        tags.addView(badge("نسخه ۱.۲", Color.rgb(31, 96, 105), Color.WHITE));
         hero.addView(tags);
         content.addView(hero);
-        content.addView(gap(26));
+        content.addView(gap(14));
+        LinearLayout sourcesCard = vertical();
+        sourcesCard.setPadding(dp(15), dp(13), dp(15), dp(13));
+        sourcesCard.setBackground(round(Color.WHITE, 17));
+        sourcesCard.addView(label("پلتفرم‌های قابل بررسی", 13, TEXT, true));
+        sourcesCard.addView(gap(7));
+        TextView sourceList = label("YouTube  •  Instagram  •  Facebook  •  TikTok  •  X\\n"
+            + "Pinterest  •  Vimeo  •  Reddit  •  Dailymotion  •  Twitch", 11, MUTED, false);
+        sourceList.setTextDirection(View.TEXT_DIRECTION_LTR);
+        sourceList.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        sourcesCard.addView(sourceList);
+        content.addView(sourcesCard);
+        content.addView(gap(23));
 
         LinearLayout sectionHeading = horizontal();
         sectionHeading.setGravity(Gravity.CENTER_VERTICAL);
@@ -182,7 +196,7 @@ public class MainActivity extends Activity {
 
         card.addView(label("آدرس ویدیو", 15, TEXT, true));
         card.addView(gap(5));
-        card.addView(label("پیوند یوتیوب یا اینستاگرام را وارد کن", 12, MUTED, false));
+        card.addView(label("لینک یکی از ۱۰ پلتفرم پشتیبانی‌شده را وارد کن", 12, MUTED, false));
         card.addView(gap(13));
 
         linkBox = new EditText(this);
@@ -192,12 +206,24 @@ public class MainActivity extends Activity {
         linkBox.setTextSize(14);
         linkBox.setTextColor(TEXT);
         linkBox.setHintTextColor(MUTED);
-        linkBox.setHint("https://youtube.com/...\nیا instagram.com/...");
+        linkBox.setHint("https://www.tiktok.com/...\nیا لینک شبکه‌های دیگر...");
         linkBox.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         linkBox.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
         linkBox.setPadding(dp(14), dp(12), dp(14), dp(12));
         linkBox.setBackground(outline(Color.rgb(249, 251, 252), Color.rgb(220, 232, 235), 13));
         card.addView(linkBox, new LinearLayout.LayoutParams(-1, dp(90)));
+        card.addView(gap(10));
+        sourceInfo = label("شبکه را پس از وارد کردن لینک تشخیص می‌دهم.", 12, MUTED, false);
+        sourceInfo.setPadding(dp(9), dp(8), dp(9), dp(8));
+        sourceInfo.setBackground(round(Color.rgb(244, 247, 249), 10));
+        card.addView(sourceInfo);
+        linkBox.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                showDetectedPlatform(text.toString());
+            }
+            @Override public void afterTextChanged(Editable text) { }
+        });
         card.addView(gap(12));
 
         Button paste = styledButton("⎘  چسباندن لینک", Color.rgb(232, 245, 243),
@@ -289,7 +315,7 @@ public class MainActivity extends Activity {
         hintCard.setPadding(dp(13), dp(14), dp(13), dp(14));
         hintCard.setBackground(round(Color.rgb(231, 242, 245), 16));
         hintCard.addView(label("ⓘ", 21, Color.rgb(35, 112, 127), true));
-        TextView hint = label("فقط فایل‌هایی را دریافت کن که اجازه دانلودشان را داری. بعضی لینک‌ها محدود هستند.",
+        TextView hint = label("دانلود فقط برای محتوای مجاز و در دسترس عمومی است. لینک‌های خصوصی، حفاظت‌شده یا محدود ممکن است کار نکنند.",
             12, Color.rgb(74, 103, 114), false);
         LinearLayout.LayoutParams hintParam = new LinearLayout.LayoutParams(0, -2, 1f);
         hintParam.setMargins(dp(9), 0, 0, 0);
@@ -382,7 +408,7 @@ public class MainActivity extends Activity {
             try {
                 VideoInfo meta = YoutubeDL.getInstance().getInfo(link);
                 runOnUiThread(() -> {
-                    setStatus("لینک معتبر است", false);
+                    setStatus("لینک " + platformName(link) + " قابل دریافت است", false);
                     detail.setText(meta.getTitle() == null ? "اطلاعات عنوان پیدا نشد" : meta.getTitle());
                 });
             } catch (Exception e) {
@@ -397,7 +423,7 @@ public class MainActivity extends Activity {
         String link = validatedLink();
         if (link == null || !begin()) return;
         final int chosen = quality.getSelectedItemPosition();
-        setStatus("در حال آماده‌سازی دانلود...", false);
+        setStatus("در حال آماده‌سازی دانلود از " + platformName(link) + "...", false);
         progress.setProgress(0);
         cancelButton.setVisibility(View.VISIBLE);
         isDownloading = true;
@@ -418,7 +444,11 @@ public class MainActivity extends Activity {
                     if (chosen == 0) fmt = "bv*+ba/b";
                     else {
                         int height = chosen == 1 ? 1080 : chosen == 2 ? 720 : chosen == 3 ? 480 : 360;
-                        fmt = "bv*[height<=" + height + "]+ba/b[height<=" + height + "]";
+                        // Some hosts provide only a combined video+audio stream.
+                        // Fall back to the nearest available format up to selected height.
+                        fmt = "bv*[height<=" + height + "]+ba/"
+                            + "bv*[height<=" + height + "]/"
+                            + "b[height<=" + height + "]/best[height<=" + height + "]";
                     }
                     req.addOption("-f", fmt);
                     req.addOption("--merge-output-format", "mp4");
@@ -573,25 +603,74 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String validatedLink() {
-        String pasted = linkBox.getText().toString().trim();
-        Matcher matcher = Pattern.compile("https?://[^\\s<>\\\"]+", Pattern.CASE_INSENSITIVE).matcher(pasted);
-        String url = matcher.find() ? matcher.group() : pasted;
-        url = url.replaceAll("[),;]+$", "");
+    // Recognise only explicit supported domains. Suffix matching must include the
+    // leading dot so e.g. "evilfacebook.com" is never treated as Facebook.
+    private boolean isDomain(String host, String domain) {
+        return host.equals(domain) || host.endsWith("." + domain);
+    }
+
+    private String platformFromHost(String host) {
+        if (host == null) return null;
+        String h = host.toLowerCase(Locale.ROOT);
+        if (isDomain(h, "youtube.com") || isDomain(h, "youtu.be") ||
+            isDomain(h, "youtube-nocookie.com")) return "YouTube";
+        if (isDomain(h, "instagram.com") || isDomain(h, "instagr.am")) return "Instagram";
+        if (isDomain(h, "facebook.com") || isDomain(h, "fb.watch") ||
+            isDomain(h, "fb.com")) return "Facebook";
+        if (isDomain(h, "tiktok.com")) return "TikTok";
+        if (isDomain(h, "x.com") || isDomain(h, "twitter.com")) return "X / Twitter";
+        if (isDomain(h, "pinterest.com") || isDomain(h, "pin.it")) return "Pinterest";
+        if (isDomain(h, "vimeo.com")) return "Vimeo";
+        if (isDomain(h, "reddit.com") || isDomain(h, "redd.it")) return "Reddit";
+        if (isDomain(h, "dailymotion.com") || isDomain(h, "dai.ly")) return "Dailymotion";
+        if (isDomain(h, "twitch.tv")) return "Twitch";
+        return null;
+    }
+
+    private String extractLink(String input) {
+        Matcher matcher = Pattern.compile("https?://[^\\\\s<>\\\\\"]+", Pattern.CASE_INSENSITIVE)
+            .matcher(input.trim());
+        String candidate = matcher.find() ? matcher.group() : input.trim();
+        return candidate.replaceAll("[\\\\p{Punct}&&[^/=:?&%._~#-]]+$", "");
+    }
+
+    private String platformName(String url) {
+        try {
+            Uri parsed = Uri.parse(url);
+            String result = platformFromHost(parsed.getHost());
+            return result == null ? "نامشخص" : result;
+        } catch (Exception ex) { return "نامشخص"; }
+    }
+
+    private void showDetectedPlatform(String input) {
+        if (sourceInfo == null) return;
+        String url = extractLink(input);
         Uri uri = Uri.parse(url);
-        String host = uri.getHost();
-        if (host == null || !("https".equalsIgnoreCase(uri.getScheme())) ||
-            !isSupportedHost(host)) {
-            toast("لینک معتبر YouTube یا Instagram با https وارد کن");
+        String name = platformFromHost(uri.getHost());
+        if (name != null && "https".equalsIgnoreCase(uri.getScheme())) {
+            sourceInfo.setText("✓   " + name + " شناسایی شد. آماده بررسی لینک.");
+            sourceInfo.setTextColor(TEAL);
+            sourceInfo.setBackground(round(Color.rgb(233, 248, 241), 10));
+        } else if (input.trim().isEmpty()) {
+            sourceInfo.setText("شبکه را پس از وارد کردن لینک تشخیص می‌دهم.");
+            sourceInfo.setTextColor(MUTED);
+            sourceInfo.setBackground(round(Color.rgb(244, 247, 249), 10));
+        } else {
+            sourceInfo.setText("لینک معتبرِ یکی از ۱۰ پلتفرم را با https وارد کن.");
+            sourceInfo.setTextColor(Color.rgb(170, 101, 39));
+            sourceInfo.setBackground(round(Color.rgb(253, 247, 231), 10));
+        }
+    }
+
+    private String validatedLink() {
+        String url = extractLink(linkBox.getText().toString());
+        Uri uri = Uri.parse(url);
+        if (!"https".equalsIgnoreCase(uri.getScheme()) ||
+            platformFromHost(uri.getHost()) == null) {
+            toast("لینک HTTPS از یکی از ۱۰ پلتفرم پشتیبانی‌شده وارد کن");
             return null;
         }
         return url;
-    }
-
-    private boolean isSupportedHost(String host) {
-        String h = host.toLowerCase(Locale.ROOT);
-        return h.equals("youtu.be") || h.equals("youtube.com") || h.endsWith(".youtube.com")
-            || h.equals("instagram.com") || h.endsWith(".instagram.com");
     }
 
     private boolean begin() {
