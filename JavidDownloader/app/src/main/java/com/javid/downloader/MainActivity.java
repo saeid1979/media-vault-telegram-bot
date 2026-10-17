@@ -3,6 +3,7 @@ package com.javid.downloader;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.os.Handler;
+import android.os.Build;
 import android.os.Looper;
 import android.Manifest;
 import android.content.pm.PackageManager;
