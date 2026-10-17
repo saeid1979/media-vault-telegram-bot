@@ -1,4 +1,4 @@
-# جاوید دانلودر | Javid Downloader 1.0
+# جاوید دانلودر | Javid Downloader 1.2.0
 
 A customized **Persian-first Android downloader** for the owner's permitted/public YouTube and Instagram downloads. Not a renamed build of YTDLnis.
 
@@ -26,3 +26,17 @@ Download only media you own or have permission to download, and observe platform
 
 ## Open source acknowledgements
 Uses the independently maintained [youtubedl-android](https://github.com/yausername/youtubedl-android) wrapper of [yt-dlp](https://github.com/yt-dlp/yt-dlp). youtubedl-android is GPL-3.0-licensed. This JavidDownloader source is made available under GNU GPLv3 and should preserve applicable upstream notices upon redistribution. It is a custom native interface built from new code, not copied branding or a fork of YTDLnis.
+
+## Platforms recognised (v1.2.0)
+
+YouTube, Instagram, Facebook, TikTok, X/Twitter, Pinterest, Vimeo,
+Reddit, Dailymotion, and Twitch. Shortened links are accepted only from
+known domains such as youtu.be, fb.watch, pin.it and dai.ly. Link
+recognition is not a guarantee that the source permits or provides a downloadable
+video; some content types (private/restricted/DRM-protected/live streams,
+still images, age-gated posts) are not downloadable. This app does not
+try to bypass authentication, protection, or access controls.
+
+Version 1.2.0 displays the detected site as links are pasted/shared,
+retains the visual overhaul and quality controls of v1.1, and uses
+format fallback for combined audio/video sources.
