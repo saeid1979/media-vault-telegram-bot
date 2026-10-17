@@ -99,14 +99,12 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        LinearLayout app = new LinearLayout(this);
-        app.setOrientation(LinearLayout.VERTICAL);
-        app.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        app.setBackgroundColor(PALE);
-        setContentView(app);
-        // Android 15+ enforces edge-to-edge. Keep the header and bottom tabs
-        // outside the system status/navigation bar gesture areas.
-        app.setOnApplyWindowInsetsListener((view, insets) -> {
+        // Persian-first visual language: expressive navy hero, muted backgrounds,
+        // generous spacing, a single strong call to action, and an anchored nav.
+        LinearLayout root = vertical();
+        root.setBackgroundColor(PALE);
+        setContentView(root);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
             int top, bottom;
             if (android.os.Build.VERSION.SDK_INT >= 30) {
                 top = insets.getInsets(android.view.WindowInsets.Type.statusBars()).top;
@@ -121,31 +119,72 @@ public class MainActivity extends Activity {
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        app.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-        LinearLayout content = new LinearLayout(this);
-        content.setPadding(dp(17), dp(18), dp(17), dp(20));
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        scroll.addView(content);
+        scroll.setClipToPadding(false);
+        scroll.setVerticalScrollBarEnabled(false);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        LinearLayout content = vertical();
+        content.setPadding(dp(18), dp(20), dp(18), dp(29));
+        content.setFocusableInTouchMode(true);
+        scroll.addView(content);
+        content.requestFocus();
+
+        // Identity / hero header
         LinearLayout hero = vertical();
-        hero.setPadding(dp(19), dp(24), dp(19), dp(23));
-        hero.setBackground(round(NAVY, 23));
-        TextView icon = label("↓   JAVID", 23, Color.rgb(255, 198, 103), true);
-        icon.setGravity(Gravity.START);
-        hero.addView(icon);
-        hero.addView(gap(16));
-        hero.addView(label("جاوید دانلودر", 28, Color.WHITE, true));
-        hero.addView(gap(8));
-        hero.addView(label("دانلود ویدیو و موسیقی از لینک‌های مجاز", 14, Color.rgb(186, 213, 215), false));
-        content.addView(hero, margin(0, 0, 0, 19));
+        hero.setPadding(dp(21), dp(22), dp(21), dp(23));
+        hero.setBackground(gradient(Color.rgb(10, 36, 51), Color.rgb(19, 91, 101), 26));
+        hero.setElevation(dp(5));
+
+        LinearLayout brand = horizontal();
+        brand.setGravity(Gravity.CENTER_VERTICAL);
+        TextView emblem = label("↓", 28, Color.rgb(251, 201, 104), true);
+        emblem.setGravity(Gravity.CENTER);
+        emblem.setBackground(outline(Color.rgb(27, 81, 92), Color.rgb(76, 135, 139), 15));
+        brand.addView(emblem, new LinearLayout.LayoutParams(dp(55), dp(55)));
+        LinearLayout brandText = vertical();
+        brandText.addView(label("JAVID  DOWNLOADER", 15, Color.WHITE, true));
+        brandText.addView(gap(3));
+        brandText.addView(label("جاوید دانلودر", 18, Color.WHITE, true));
+        LinearLayout.LayoutParams bt = new LinearLayout.LayoutParams(0, -2, 1f);
+        bt.setMargins(dp(12), 0, 0, 0);
+        brand.addView(brandText, bt);
+        hero.addView(brand);
+
+        hero.addView(gap(22));
+        hero.addView(label("لینک بده، فایل بگیر.", 23, Color.WHITE, true));
+        hero.addView(gap(7));
+        hero.addView(label("ویدیو و موسیقی را با کیفیت دلخواه ذخیره کن", 13,
+            Color.rgb(206, 230, 232), false));
+        hero.addView(gap(17));
+        LinearLayout tags = horizontal();
+        tags.addView(badge("▶  YouTube", Color.rgb(31, 96, 105), Color.WHITE));
+        tags.addView(gapHorizontal(8));
+        tags.addView(badge("◎  Instagram", Color.rgb(31, 96, 105), Color.WHITE));
+        tags.addView(gapHorizontal(8));
+        tags.addView(badge("نسخه ۱.۱", Color.rgb(255, 207, 119), NAVY));
+        hero.addView(tags);
+        content.addView(hero);
+        content.addView(gap(26));
+
+        LinearLayout sectionHeading = horizontal();
+        sectionHeading.setGravity(Gravity.CENTER_VERTICAL);
+        sectionHeading.addView(label("دانلود جدید", 20, TEXT, true),
+            new LinearLayout.LayoutParams(0, -2, 1f));
+        sectionHeading.addView(badge("لینک مستقیم", Color.rgb(227, 243, 241), TEAL));
+        content.addView(sectionHeading);
+        content.addView(gap(13));
 
         downloadPanel = vertical();
         LinearLayout card = vertical();
-        card.setPadding(dp(17), dp(19), dp(17), dp(17));
-        card.setBackground(round(Color.WHITE, 18));
-        card.addView(label("لینک ویدیو را وارد کن", 19, TEXT, true));
-        card.addView(gap(11));
+        card.setPadding(dp(17), dp(20), dp(17), dp(20));
+        card.setBackground(round(Color.WHITE, 22));
+        card.setElevation(dp(3));
+
+        card.addView(label("آدرس ویدیو", 15, TEXT, true));
+        card.addView(gap(5));
+        card.addView(label("پیوند یوتیوب یا اینستاگرام را وارد کن", 12, MUTED, false));
+        card.addView(gap(13));
+
         linkBox = new EditText(this);
         linkBox.setSingleLine(false);
         linkBox.setMinLines(2);
@@ -153,98 +192,144 @@ public class MainActivity extends Activity {
         linkBox.setTextSize(14);
         linkBox.setTextColor(TEXT);
         linkBox.setHintTextColor(MUTED);
-        linkBox.setHint("لینک YouTube یا Instagram...");
+        linkBox.setHint("https://youtube.com/...\nیا instagram.com/...");
         linkBox.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         linkBox.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-        linkBox.setPadding(dp(12), dp(8), dp(12), dp(8));
-        linkBox.setBackground(round(PALE, 11));
-        card.addView(linkBox, new LinearLayout.LayoutParams(-1, dp(75)));
-        card.addView(gap(11));
+        linkBox.setPadding(dp(14), dp(12), dp(14), dp(12));
+        linkBox.setBackground(outline(Color.rgb(249, 251, 252), Color.rgb(220, 232, 235), 13));
+        card.addView(linkBox, new LinearLayout.LayoutParams(-1, dp(90)));
+        card.addView(gap(12));
 
-        Button paste = button("📋  چسباندن لینک", PALE, TEXT);
-        card.addView(paste);
+        Button paste = styledButton("⎘  چسباندن لینک", Color.rgb(232, 245, 243),
+            Color.rgb(0, 126, 110), 13, 12);
+        card.addView(paste, new LinearLayout.LayoutParams(-1, dp(45)));
         paste.setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = cm == null ? null : cm.getPrimaryClip();
             if (clip != null && clip.getItemCount() > 0) {
-                String str = String.valueOf(clip.getItemAt(0).coerceToText(this));
-                linkBox.setText(str);
+                linkBox.setText(String.valueOf(clip.getItemAt(0).coerceToText(this)));
             } else { toast("متنی در کلیپ‌بورد نیست"); }
         });
-        card.addView(gap(16));
-        card.addView(label("کیفیت دانلود", 16, TEXT, true));
+
+        card.addView(gap(22));
+        card.addView(label("کیفیت خروجی", 15, TEXT, true));
+        card.addView(gap(9));
+        LinearLayout qualityWrap = horizontal();
+        qualityWrap.setPadding(dp(12), 0, dp(12), 0);
+        qualityWrap.setGravity(Gravity.CENTER_VERTICAL);
+        qualityWrap.setBackground(outline(Color.rgb(249, 251, 252), Color.rgb(220, 232, 235), 13));
+        TextView resolutionIcon = label("▣", 22, TEAL, true);
+        qualityWrap.addView(resolutionIcon);
         quality = new Spinner(this);
         String[] options = {"بهترین کیفیت", "1080p", "720p", "480p", "360p", "فقط صدا (MP3)"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, options);
         quality.setAdapter(adapter);
-        card.addView(quality, new LinearLayout.LayoutParams(-1, dp(53)));
-        card.addView(gap(8));
+        qualityWrap.addView(quality, new LinearLayout.LayoutParams(0, dp(54), 1f));
+        card.addView(qualityWrap);
 
-        checkButton = button("بررسی عنوان لینک", PALE, NAVY);
-        card.addView(checkButton);
+        card.addView(gap(18));
+        LinearLayout utilities = horizontal();
+        checkButton = styledButton("بررسی لینک", Color.rgb(244, 247, 250), NAVY, 12, 12);
+        updateButton = styledButton("↻  به‌روزرسانی موتور", Color.rgb(244, 247, 250), NAVY, 12, 12);
+        utilities.addView(checkButton, new LinearLayout.LayoutParams(0, dp(47), 1f));
+        utilities.addView(gapHorizontal(8));
+        utilities.addView(updateButton, new LinearLayout.LayoutParams(0, dp(47), 1f));
+        card.addView(utilities);
         checkButton.setOnClickListener(v -> inspect());
-        card.addView(gap(9));
-        updateButton = button("↻  به‌روزرسانی موتور دانلود", PALE, TEAL);
-        card.addView(updateButton);
         updateButton.setOnClickListener(v -> updateEngine(false));
-        card.addView(gap(9));
-        startButton = button("⬇  شروع دانلود", TEAL, Color.WHITE);
-        card.addView(startButton);
+
+        card.addView(gap(14));
+        startButton = styledButton("↓    شروع دانلود", TEAL, Color.WHITE, 17, 15);
+        startButton.setBackground(gradient(Color.rgb(4, 163, 143), Color.rgb(0, 128, 118), 15));
+        startButton.setElevation(dp(2));
+        card.addView(startButton, new LinearLayout.LayoutParams(-1, dp(56)));
         startButton.setOnClickListener(v -> download());
 
-        cancelButton = button("توقف دانلود", PALE, Color.rgb(170, 70, 64));
+        cancelButton = styledButton("توقف دانلود", Color.rgb(255, 241, 239),
+            Color.rgb(182, 61, 57), 14, 12);
         cancelButton.setVisibility(View.GONE);
-        card.addView(cancelButton);
+        card.addView(cancelButton, margin(0, 10, 0, 0));
         cancelButton.setOnClickListener(v -> {
             if (isDownloading) {
                 YoutubeDL.getInstance().destroyProcessById(processId);
                 setStatus("درخواست توقف ارسال شد", true);
             }
         });
+        downloadPanel.addView(card);
 
-        card.addView(gap(16));
-        state = label("در حال آماده‌سازی موتور دانلود...", 14, MUTED, false);
-        card.addView(state);
+        downloadPanel.addView(gap(17));
+        LinearLayout statusCard = vertical();
+        statusCard.setPadding(dp(17), dp(17), dp(17), dp(18));
+        statusCard.setBackground(round(Color.WHITE, 19));
+        statusCard.setElevation(dp(1));
+        LinearLayout statusHeading = horizontal();
+        statusHeading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView smallDot = label("●", 15, TEAL, true);
+        statusHeading.addView(smallDot);
+        TextView statusTitle = label("  وضعیت دانلود", 16, TEXT, true);
+        statusHeading.addView(statusTitle);
+        statusCard.addView(statusHeading);
+        statusCard.addView(gap(12));
+        state = label("در حال آماده‌سازی موتور دانلود...", 13, TEAL, true);
+        statusCard.addView(state);
+        statusCard.addView(gap(12));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setProgress(0);
         progress.setProgressTintList(ColorStateList.valueOf(TEAL));
-        card.addView(progress, margin(0, 10, 0, 0));
-        detail = label("ابتدا لینک را وارد کن. برای شروع برنامه را باز نگه دار.", 12, MUTED, false);
-        card.addView(detail, margin(0, 8, 0, 0));
-        downloadPanel.addView(card);
-        TextView note = label("فقط ویدیوها و فایل‌هایی را دریافت کن که حق دانلودشان را داری. بعضی لینک‌های خصوصی یا محدود قابل دریافت نیستند.", 12, MUTED, false);
-        downloadPanel.addView(note, margin(10, 16, 10, 0));
+        progress.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(228, 237, 239)));
+        statusCard.addView(progress, new LinearLayout.LayoutParams(-1, dp(7)));
+        detail = label("بعد از وارد کردن لینک، روی شروع دانلود بزن.", 12, MUTED, false);
+        statusCard.addView(detail, margin(0, 13, 0, 0));
+        downloadPanel.addView(statusCard);
+        downloadPanel.addView(gap(15));
+
+        LinearLayout hintCard = horizontal();
+        hintCard.setGravity(Gravity.CENTER_VERTICAL);
+        hintCard.setPadding(dp(13), dp(14), dp(13), dp(14));
+        hintCard.setBackground(round(Color.rgb(231, 242, 245), 16));
+        hintCard.addView(label("ⓘ", 21, Color.rgb(35, 112, 127), true));
+        TextView hint = label("فقط فایل‌هایی را دریافت کن که اجازه دانلودشان را داری. بعضی لینک‌ها محدود هستند.",
+            12, Color.rgb(74, 103, 114), false);
+        LinearLayout.LayoutParams hintParam = new LinearLayout.LayoutParams(0, -2, 1f);
+        hintParam.setMargins(dp(9), 0, 0, 0);
+        hintCard.addView(hint, hintParam);
+        downloadPanel.addView(hintCard);
         content.addView(downloadPanel);
 
         historyPanel = vertical();
         historyPanel.setVisibility(View.GONE);
+        historyPanel.addView(label("دانلودهای من", 21, TEXT, true));
+        historyPanel.addView(gap(5));
+        historyPanel.addView(label("فایل‌های ذخیره‌شده روی گوشی", 12, MUTED, false));
+        historyPanel.addView(gap(15));
         LinearLayout histCard = vertical();
-        histCard.setPadding(dp(15), dp(17), dp(15), dp(17));
-        histCard.setBackground(round(Color.WHITE, 18));
-        histCard.addView(label("فایل‌های دانلودشده", 19, TEXT, true));
-        histCard.addView(gap(10));
+        histCard.setPadding(dp(14), dp(17), dp(14), dp(14));
+        histCard.setBackground(round(Color.WHITE, 21));
+        histCard.setElevation(dp(2));
         historyItems = vertical();
         histCard.addView(historyItems);
         historyPanel.addView(histCard);
         content.addView(historyPanel);
 
-        LinearLayout bottom = new LinearLayout(this);
-        bottom.setPadding(dp(15), dp(8), dp(15), dp(12));
+        // Persistent bottom navigation, with correct Android window inset padding.
+        LinearLayout bottom = horizontal();
+        bottom.setPadding(dp(18), dp(11), dp(18), dp(13));
+        bottom.setGravity(Gravity.CENTER_VERTICAL);
         bottom.setBackgroundColor(Color.WHITE);
-        bottom.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        app.addView(bottom, new LinearLayout.LayoutParams(-1, -2));
-        Button downTab = button("↓  دانلود", NAVY, Color.WHITE);
-        Button histTab = button("◷  تاریخچه", PALE, NAVY);
-        bottom.addView(downTab, new LinearLayout.LayoutParams(0, dp(49), 1f));
+        bottom.setElevation(dp(12));
+        root.addView(bottom, new LinearLayout.LayoutParams(-1, -2));
+        Button downTab = styledButton("↓   دانلود", NAVY, Color.WHITE, 15, 13);
+        Button histTab = styledButton("◷   تاریخچه", Color.rgb(241, 246, 247), NAVY, 15, 13);
+        bottom.addView(downTab, new LinearLayout.LayoutParams(0, dp(51), 1f));
         bottom.addView(gapHorizontal(10));
-        bottom.addView(histTab, new LinearLayout.LayoutParams(0, dp(49), 1f));
+        bottom.addView(histTab, new LinearLayout.LayoutParams(0, dp(51), 1f));
         downTab.setOnClickListener(v -> {
             downloadPanel.setVisibility(View.VISIBLE);
             historyPanel.setVisibility(View.GONE);
-            downTab.setBackground(round(NAVY, 12));
+            downTab.setBackground(round(NAVY, 15));
             downTab.setTextColor(Color.WHITE);
-            histTab.setBackground(round(PALE, 12));
+            histTab.setBackground(round(Color.rgb(241, 246, 247), 15));
             histTab.setTextColor(NAVY);
             scroll.smoothScrollTo(0, 0);
         });
@@ -252,9 +337,9 @@ public class MainActivity extends Activity {
             refreshHistory();
             downloadPanel.setVisibility(View.GONE);
             historyPanel.setVisibility(View.VISIBLE);
-            histTab.setBackground(round(NAVY, 12));
+            histTab.setBackground(round(NAVY, 15));
             histTab.setTextColor(Color.WHITE);
-            downTab.setBackground(round(PALE, 12));
+            downTab.setBackground(round(Color.rgb(241, 246, 247), 15));
             downTab.setTextColor(NAVY);
             scroll.smoothScrollTo(0, 0);
         });
@@ -429,20 +514,49 @@ public class MainActivity extends Activity {
         try {
             JSONArray items = new JSONArray(getPreferences(MODE_PRIVATE).getString("history", "[]"));
             if (items.length() == 0) {
-                historyItems.addView(label("هنوز فایلی دانلود نشده است.", 14, MUTED, false));
+                TextView emptyIcon = label("↓", 42, TEAL, true);
+                emptyIcon.setGravity(Gravity.CENTER);
+                emptyIcon.setBackground(round(Color.rgb(230, 247, 242), 22));
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(76), dp(76));
+                iconParams.gravity = Gravity.CENTER_HORIZONTAL;
+                iconParams.setMargins(0, dp(24), 0, dp(17));
+                historyItems.addView(emptyIcon, iconParams);
+                TextView emptyTitle = label("هنوز دانلودی ثبت نشده", 17, TEXT, true);
+                emptyTitle.setGravity(Gravity.CENTER);
+                historyItems.addView(emptyTitle);
+                TextView emptyText = label("وقتی فایلی دانلود کنی، اینجا نمایش داده می‌شود.", 12, MUTED, false);
+                emptyText.setGravity(Gravity.CENTER);
+                historyItems.addView(emptyText, margin(0, 10, 0, 32));
                 return;
             }
             for (int i = 0; i < items.length(); i++) {
                 JSONObject item = items.getJSONObject(i);
                 final Uri uri = Uri.parse(item.getString("uri"));
                 LinearLayout row = vertical();
-                row.setPadding(dp(10), dp(13), dp(10), dp(13));
-                row.setBackground(round(PALE, 12));
-                row.addView(label(item.optString("name", "فایل"), 14, TEXT, true));
-                row.addView(gap(4));
-                row.addView(label(item.optString("date", ""), 12, MUTED, false));
-                Button open = button("باز کردن فایل", TEAL, Color.WHITE);
-                row.addView(open, margin(0, 8, 0, 0));
+                row.setPadding(dp(12), dp(14), dp(12), dp(14));
+                row.setBackground(outline(Color.rgb(250, 252, 253), Color.rgb(228, 235, 238), 15));
+                LinearLayout top = horizontal();
+                top.setGravity(Gravity.CENTER_VERTICAL);
+                TextView fileIcon = label("♫", 22, TEAL, true);
+                if (!item.optString("name", "").toLowerCase(Locale.ROOT).endsWith(".mp3")) {
+                    fileIcon.setText("▣");
+                }
+                fileIcon.setGravity(Gravity.CENTER);
+                fileIcon.setBackground(round(Color.rgb(229, 244, 242), 13));
+                top.addView(fileIcon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+                LinearLayout info = vertical();
+                TextView title = label(item.optString("name", "فایل"), 13, TEXT, true);
+                title.setMaxLines(2);
+                title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                info.addView(title);
+                info.addView(gap(5));
+                info.addView(label(item.optString("date", ""), 11, MUTED, false));
+                LinearLayout.LayoutParams infoParam = new LinearLayout.LayoutParams(0, -2, 1f);
+                infoParam.setMargins(dp(10), 0, 0, 0);
+                top.addView(info, infoParam);
+                row.addView(top);
+                Button open = styledButton("باز کردن فایل ←", Color.rgb(230, 247, 243), TEAL, 13, 11);
+                row.addView(open, margin(0, 10, 0, 0));
                 open.setOnClickListener(v -> {
                     try {
                         String type = getContentResolver().getType(uri);
@@ -452,7 +566,7 @@ public class MainActivity extends Activity {
                         startActivity(intent);
                     } catch (Exception e) { toast("برای این فایل برنامه مناسب نصب نیست"); }
                 });
-                historyItems.addView(row, margin(0, 0, 0, 9));
+                historyItems.addView(row, margin(0, 0, 0, 10));
             }
         } catch (Exception e) {
             historyItems.addView(label("خواندن تاریخچه ممکن نبود.", 14, MUTED, false));
@@ -542,6 +656,46 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.setMargins(dp(l), dp(t), dp(r), dp(b)); return lp;
     }
+    private LinearLayout horizontal() {
+        LinearLayout ll = new LinearLayout(this);
+        ll.setOrientation(LinearLayout.HORIZONTAL);
+        ll.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        return ll;
+    }
+    private GradientDrawable outline(int fill, int stroke, int radius) {
+        GradientDrawable bg = round(fill, radius);
+        bg.setStroke(dp(1), stroke);
+        return bg;
+    }
+    private GradientDrawable gradient(int from, int to, int radius) {
+        GradientDrawable bg = new GradientDrawable(
+            GradientDrawable.Orientation.TL_BR, new int[]{from, to});
+        bg.setCornerRadius(dp(radius));
+        return bg;
+    }
+    private TextView badge(String title, int bg, int fg) {
+        TextView t = label(title, 11, fg, true);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(11), dp(7), dp(11), dp(7));
+        t.setBackground(round(bg, 50));
+        return t;
+    }
+    private Button styledButton(String title, int bg, int fg, int textSize, int radius) {
+        Button b = new Button(this);
+        b.setText(title);
+        b.setTextSize(textSize);
+        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        b.setTextColor(fg);
+        b.setAllCaps(false);
+        b.setIncludeFontPadding(false);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(7), 0, dp(7), 0);
+        b.setBackground(round(bg, radius));
+        b.setMinHeight(dp(44));
+        b.setStateListAnimator(null);
+        return b;
+    }
+
     private LinearLayout vertical() {
         LinearLayout ll = new LinearLayout(this);
         ll.setOrientation(LinearLayout.VERTICAL);
