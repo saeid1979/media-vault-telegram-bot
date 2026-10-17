@@ -427,16 +427,33 @@ public class MainActivity extends Activity {
     private void inspect() {
         String link = validatedLink();
         if (link == null || !begin()) return;
-        setStatus("در حال بررسی لینک...", false);
+        setStatus("در حال دریافت اطلاعات و تصویر ویدیو...", false);
         executor.execute(() -> {
             try {
-                VideoInfo meta = YoutubeDL.getInstance().getInfo(link);
+                YoutubeDLRequest request = new YoutubeDLRequest(link);
+                request.addOption("--no-playlist");
+                VideoInfo info = YoutubeDL.getInstance().getInfo(request);
+                String title = info.getTitle() == null ? "ویدیوی " + platformName(link) : info.getTitle();
+                String uploader = info.getUploader() == null ? "" : info.getUploader();
+                String thumb = info.getThumbnail();
+                String length = durationText(info.getDuration());
                 runOnUiThread(() -> {
-                    setStatus("لینک " + platformName(link) + " قابل دریافت است", false);
-                    detail.setText(meta.getTitle() == null ? "اطلاعات عنوان پیدا نشد" : meta.getTitle());
+                    if (!link.equals(extractLink(linkBox.getText().toString()))) return;
+                    previewUrl = link;
+                    previewTitle.setText(title);
+                    previewMeta.setText(platformName(link) + (uploader.isEmpty() ? "" : "   ·   " + uploader));
+                    previewDuration.setText(length);
+                    previewImage.setImageDrawable(null);
+                    previewPanel.setVisibility(View.VISIBLE);
+                    setStatus("پیش‌نمایش آماده است ✓", false);
+                    detail.setText("روی ویدیو یا MP3 بزن تا فایل ذخیره شود.");
+                    loadThumbnail(thumb, link);
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> setStatus("بررسی لینک: " + message(e), true));
+                runOnUiThread(() -> {
+                    previewPanel.setVisibility(View.GONE);
+                    setStatus("خطای پیش‌نمایش: " + message(e), true);
+                });
             } finally {
                 runOnUiThread(() -> end());
             }
@@ -444,9 +461,12 @@ public class MainActivity extends Activity {
     }
 
     private void download() {
+        download(-1);
+    }
+    private void download(int forcedQuality) {
         String link = validatedLink();
         if (link == null || !begin()) return;
-        final int chosen = quality.getSelectedItemPosition();
+        final int chosen = forcedQuality < 0 ? quality.getSelectedItemPosition() : forcedQuality;
         setStatus("در حال آماده‌سازی دانلود از " + platformName(link) + "...", false);
         progress.setProgress(0);
         cancelButton.setVisibility(View.VISIBLE);
@@ -734,6 +754,8 @@ public class MainActivity extends Activity {
         startButton.setEnabled(false);
         checkButton.setEnabled(false);
         updateButton.setEnabled(false);
+        videoButton.setEnabled(false);
+        audioButton.setEnabled(false);
         return true;
     }
 
@@ -742,6 +764,8 @@ public class MainActivity extends Activity {
         startButton.setEnabled(true);
         checkButton.setEnabled(true);
         updateButton.setEnabled(true);
+        videoButton.setEnabled(true);
+        audioButton.setEnabled(true);
     }
 
     @Override protected void onNewIntent(Intent intent) {
