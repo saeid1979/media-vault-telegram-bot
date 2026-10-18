@@ -37,6 +37,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import android.os.SystemClock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -58,7 +60,60 @@ public final class TelegramBotService extends Service {
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
     private static final Pattern LINK = Pattern.compile("https://\\S+", Pattern.CASE_INSENSITIVE);
     private final ExecutorService pollExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService downloadExecutor = Executors.newSingleThreadExecutor();
+    // Polling must never wait for Telegram replies or long-running yt-dlp jobs.
+    // Stable chat-to-lane routing preserves message order for each Telegram user.
+    private final ExecutorService[] replyLanes = new ExecutorService[] {
+        Executors.newSingleThreadExecutor(), Executors.newSingleThreadExecutor(),
+        Executors.newSingleThreadExecutor(), Executors.newSingleThreadExecutor()
+    };
+    private final AtomicInteger queuedReplies = new AtomicInteger();
+    private final ExecutorService downloadExecutor = Executors.newFixedThreadPool(2);
+    private final AtomicInteger outstandingDownloads = new AtomicInteger();
+    private final Map<Long, Boolean> userDownloads = new ConcurrentHashMap<>();
+    private volatile boolean mediaInitialized = false;
+    private final Object mediaLock = new Object();
+    private void ensureMediaReady() throws Exception {
+        if (mediaInitialized) return;
+        synchronized (mediaLock) {
+            if (mediaInitialized) return;
+            YoutubeDL.getInstance().init(getApplicationContext());
+            FFmpeg.getInstance().init(getApplicationContext());
+            mediaInitialized = true;
+        }
+    }
+    private long updateUser(JSONObject update) {
+        JSONObject part = update.optJSONObject("callback_query");
+        if (part != null && part.optJSONObject("from") != null)
+            return part.optJSONObject("from").optLong("id", 0);
+        part = update.optJSONObject("message");
+        if (part != null && part.optJSONObject("from") != null)
+            return part.optJSONObject("from").optLong("id", 0);
+        return 0;
+    }
+    private void dispatch(JSONObject update, String tok) throws InterruptedException {
+        // Backpressure prevents unbounded memory growth if Telegram is unavailable.
+        while (running && queuedReplies.get() >= 80) Thread.sleep(100);
+        if (!running) return;
+        queuedReplies.incrementAndGet();
+        long received = SystemClock.elapsedRealtime();
+        int lane = (int)Math.floorMod(updateUser(update), replyLanes.length);
+        try {
+            replyLanes[lane].execute(() -> {
+                try {
+                    long delay = SystemClock.elapsedRealtime() - received;
+                    preferences().edit().putLong("last_reply_queue_ms", delay).apply();
+                    handle(update, tok);
+                } catch (Exception failure) {
+                    status("خطا در پاسخ به یک پیام؛ بات فعال است");
+                } finally {
+                    queuedReplies.decrementAndGet();
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            queuedReplies.decrementAndGet();
+            throw stopped;
+        }
+    }
     private final Map<String, PendingDownload> pending = new ConcurrentHashMap<>();
     private volatile boolean running = false;
     private volatile HttpURLConnection pollConnection;
@@ -145,6 +200,10 @@ public final class TelegramBotService extends Service {
         }
         preferences().edit().putBoolean("enabled", true).apply();
         status("در حال اتصال به بات تلگرام...");
+        // Prime the media libraries in the background instead of repeating setup for each download.
+        downloadExecutor.execute(() -> {
+            try { ensureMediaReady(); } catch (Exception ignored) { /* surfaced at download time */ }
+        });
         pollExecutor.execute(this::loop);
         return START_NOT_STICKY;
     }
@@ -156,6 +215,7 @@ public final class TelegramBotService extends Service {
         preferences().edit().putBoolean("enabled", false).apply();
         status("ربات متوقف است");
         downloadExecutor.shutdownNow();
+        for (ExecutorService lane : replyLanes) lane.shutdownNow();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -166,6 +226,7 @@ public final class TelegramBotService extends Service {
         if (c != null) c.disconnect();
         pollExecutor.shutdownNow();
         downloadExecutor.shutdownNow();
+        for (ExecutorService lane : replyLanes) lane.shutdownNow();
         preferences().edit().putBoolean("enabled", false).apply();
         super.onDestroy();
     }
@@ -205,9 +266,13 @@ public final class TelegramBotService extends Service {
                         JSONObject update = updates.getJSONObject(i);
                         long id = update.getLong("update_id");
                         cursor = Math.max(cursor, id + 1);
-                        preferences().edit().putLong("update_id", cursor).apply();
-                        try { handle(update, apiToken); }
-                        catch (Exception ignored) { status("خطا در پردازش پیام، ربات در حال تلاش مجدد است"); }
+                        try {
+                            dispatch(update, apiToken);
+                            preferences().edit().putLong("update_id", cursor).apply();
+                        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+                            if (!running) break;
+                            throw stopped;
+                        }
                     }
                     status("متصل به @" + username + " · آماده دریافت لینک");
                 } catch (Exception failure) {
@@ -296,11 +361,36 @@ public final class TelegramBotService extends Service {
                 );
                 sendText(chat, "کدام فرمت را می‌خواهی؟", buttons, tok);
             } else if (data.startsWith("fmt:") && parts.length == 3) {
+                if (userDownloads.putIfAbsent(who, true) != null) {
+                    sendText(chat, "یک دانلود دیگر برای شما در حال انجام یا انتظار است. بعد از پایان آن دوباره درخواست بده.", tok);
+                    return;
+                }
+                int queued = outstandingDownloads.incrementAndGet();
+                if (queued > 8) {
+                    outstandingDownloads.decrementAndGet();
+                    userDownloads.remove(who);
+                    sendText(chat, "صف دانلود فعلاً پر است. لطفاً کمی بعد دوباره تلاش کن.", tok);
+                    return;
+                }
                 pending.remove(parts[1]);
                 boolean audio = "a".equals(parts[2]);
-                sendText(chat, "درخواست " + (audio ? "MP3" : "ویدیو") +
-                    " دریافت شد؛ دانلود در گوشی شروع می‌شود.", tok);
-                downloadExecutor.execute(() -> downloadAndSend(who, chat, item.url, audio, tok));
+                try {
+                    downloadExecutor.execute(() -> {
+                        try { downloadAndSend(who, chat, item.url, audio, tok); }
+                        finally {
+                            userDownloads.remove(who);
+                            outstandingDownloads.decrementAndGet();
+                        }
+                    });
+                } catch (java.util.concurrent.RejectedExecutionException stopped) {
+                    outstandingDownloads.decrementAndGet();
+                    userDownloads.remove(who);
+                    sendText(chat, "بات در حال توقف است؛ درخواست را بعداً تکرار کن.", tok);
+                    return;
+                }
+                sendText(chat, "✅ درخواست " + (audio ? "MP3" : "ویدیو") +
+                    " ثبت شد. " + (queued > 2 ? "در صف انتظار: " + (queued - 2) :
+                    "در حال دریافت فایل روی گوشی") + ".", tok);
             } else if (data.startsWith("cancel:")) {
                 pending.remove(parts[1]);
                 sendText(chat, "لغو شد.", tok);
@@ -360,6 +450,16 @@ public final class TelegramBotService extends Service {
             sendText(chat, "✅ بات روی گوشی Javid Downloader فعال است.", tok);
             return;
         }
+        if (text.startsWith("/speed") && isOwner(user)) {
+            SharedPreferences p = preferences();
+            sendText(chat, "🧪 وضعیت عملکرد بات روی گوشی" +
+                "\nدرخواست‌های منتظر پاسخ: " + queuedReplies.get() +
+                "\nدانلودهای فعال و در صف: " + outstandingDownloads.get() +
+                "\nانتظار آخرین پیام: " + p.getLong("last_reply_queue_ms", 0) + " ms" +
+                "\nزمان آخرین دانلود موفق: " + p.getLong("last_download_ms", 0) / 1000 + " ثانیه" +
+                "\nزمان آخرین آپلود موفق: " + p.getLong("last_upload_ms", 0) / 1000 + " ثانیه", tok);
+            return;
+        }
         if (text.startsWith("/profile") || text.startsWith("/limits")) {
             BotUserStore.User info = userStore.find(user);
             String profile = isOwner(user) ? "مالک · نامحدود" : info == null ? "ثبت نشده" :
@@ -416,21 +516,28 @@ public final class TelegramBotService extends Service {
                 return;
             }
             if (!folder.mkdirs()) throw new Exception("Cannot create temporary folder");
-            YoutubeDL.getInstance().init(getApplicationContext());
-            FFmpeg.getInstance().init(getApplicationContext());
+            ensureMediaReady();
+            long startedDownload = SystemClock.elapsedRealtime();
             YoutubeDLRequest request = new YoutubeDLRequest(link);
             request.addOption("--no-playlist");
             request.addOption("--no-mtime");
             request.addOption("--max-filesize", "45M");
+            request.addOption("--concurrent-fragments", "4");
+            request.addOption("--retries", "3");
+            request.addOption("--fragment-retries", "3");
+            request.addOption("--socket-timeout", "20");
             request.addOption("-o", new File(folder, "%(title).110B [%(id)s].%(ext)s").getAbsolutePath());
             if (audio) {
                 request.addOption("-x");
                 request.addOption("--audio-format", "mp3");
+                request.addOption("--audio-quality", "5");
             } else {
-                request.addOption("-f", "bv*[height<=720]+ba/b[height<=720]/best");
+                // Prefer one-file MP4 when available; it avoids a costly phone-side merge.
+                request.addOption("-f", "b[height<=720][ext=mp4]/b[height<=720]/bv*[height<=720]+ba/b[height<=720]/best");
                 request.addOption("--merge-output-format", "mp4");
             }
             YoutubeDL.getInstance().execute(request, "telegram-" + UUID.randomUUID(), null);
+            long downloadMs = SystemClock.elapsedRealtime() - startedDownload;
             File[] files = folder.listFiles((dir, name) -> {
                 String n = name.toLowerCase(java.util.Locale.ROOT);
                 return !n.endsWith(".part") && !n.endsWith(".ytdl") && !n.endsWith(".json")
@@ -447,7 +554,11 @@ public final class TelegramBotService extends Service {
                 return;
             }
             sendText(chat, "دانلود تمام شد. فایل در حال ارسال به تلگرام است...", tok);
+            long uploadStart = SystemClock.elapsedRealtime();
             uploadDocument(chat, best, tok);
+            long uploadMs = SystemClock.elapsedRealtime() - uploadStart;
+            preferences().edit().putLong("last_download_ms", downloadMs)
+                .putLong("last_upload_ms", uploadMs).apply();
             if (!isOwner(who)) userStore.recordDelivered(who);
             preferences().edit().putInt("delivered", preferences().getInt("delivered", 0) + 1).apply();
         } catch (Exception e) {
