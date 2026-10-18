@@ -97,8 +97,10 @@ public final class TelegramBotService extends Service {
             int p = Math.max(0, Math.min(100, percent));
             String label = "upload".equals(stage) ? "📤 ارسال به تلگرام" :
                 "processing".equals(stage) ? "🔄 آماده‌سازی فایل" :
+                "confirming".equals(stage) ? "⌛ در انتظار تأیید تلگرام" :
                 "waiting".equals(stage) ? "⏳ در صف دانلود" : "⬇️ دانلود";
-            if ("processing".equals(stage) || "waiting".equals(stage)) return label + "…";
+            if ("processing".equals(stage) || "waiting".equals(stage) ||
+                "confirming".equals(stage)) return label + "…";
             int blocks = Math.min(10, p / 10);
             StringBuilder bar = new StringBuilder();
             for (int i = 0; i < 10; i++) bar.append(i < blocks ? "■" : "□");
@@ -575,17 +577,16 @@ public final class TelegramBotService extends Service {
         return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
     }
 
-    private void downloadAndSend(long who, long chat, String link, boolean audio, String tok) {
+    private void downloadAndSend(long who, long chat, String link, boolean audio,
+                                 String tok, ProgressReporter reporter) {
         File folder = new File(getExternalFilesDir(null), "bot-work/" + UUID.randomUUID());
         try {
-            if (!canDownload(who)) {
-                sendText(chat, accessMessage(who), tok);
-                return;
-            }
-            if (preferences().getBoolean("wifi_only", true) && !onWifi()) {
-                sendText(chat, "برای جلوگیری از مصرف اینترنت سیم‌کارت، دانلود بات فقط روی Wi-Fi فعال است. می‌توانی این تنظیم را در اپ تغییر دهی.", tok);
-                return;
-            }
+            reporter.phase("download");
+            reporter.percent(0);
+            if (!canDownload(who))
+                throw new IllegalStateException(accessMessage(who));
+            if (preferences().getBoolean("wifi_only", true) && !onWifi())
+                throw new IllegalStateException("دانلود فقط روی Wi-Fi فعال است. تنظیمات بات را بررسی کن.");
             if (!folder.mkdirs()) throw new Exception("Cannot create temporary folder");
             ensureMediaReady();
             long startedDownload = SystemClock.elapsedRealtime();
@@ -607,7 +608,18 @@ public final class TelegramBotService extends Service {
                 request.addOption("-f", "b[height<=720][ext=mp4]/b[height<=720]/bv*[height<=720]+ba/b[height<=720]/best");
                 request.addOption("--merge-output-format", "mp4");
             }
-            YoutubeDL.getInstance().execute(request, "telegram-" + UUID.randomUUID(), null);
+            Function3<Float, Long, String, Unit> track = (p, eta, output) -> {
+                if (output != null && (output.contains("[ExtractAudio]") ||
+                    output.contains("[Merger]") || output.contains("[VideoConvertor]"))) {
+                    reporter.phase("processing");
+                } else if (!"processing".equals(reporter.stage)) {
+                    reporter.phase("download");
+                    reporter.percent(p == null ? 0 : p);
+                }
+                return Unit.INSTANCE;
+            };
+            YoutubeDL.getInstance().execute(request, "telegram-" + UUID.randomUUID(), track);
+            reporter.phase("processing");
             long downloadMs = SystemClock.elapsedRealtime() - startedDownload;
             File[] files = folder.listFiles((dir, name) -> {
                 String n = name.toLowerCase(java.util.Locale.ROOT);
@@ -620,27 +632,30 @@ public final class TelegramBotService extends Service {
                     best = candidate;
             }
             if (best == null || best.length() == 0) throw new Exception("No output media");
-            if (best.length() > MAX_UPLOAD) {
-                sendText(chat, "فایل بزرگ‌تر از سقف ۴۵ مگابایت ارسال بات است. کیفیت پایین‌تر را انتخاب کن یا از دانلود داخل اپ استفاده کن.", tok);
-                return;
-            }
-            sendText(chat, "دانلود تمام شد. فایل در حال ارسال به تلگرام است...", tok);
+            if (best.length() > MAX_UPLOAD)
+                throw new IllegalStateException("فایل بیش از ۴۵ مگابایت است. کیفیت پایین‌تر را امتحان کن.");
+            reporter.phase("upload");
+            reporter.percent(0);
             long uploadStart = SystemClock.elapsedRealtime();
-            uploadDocument(chat, best, tok);
+            uploadDocument(chat, best, tok, reporter);
             long uploadMs = SystemClock.elapsedRealtime() - uploadStart;
             preferences().edit().putLong("last_download_ms", downloadMs)
                 .putLong("last_upload_ms", uploadMs).apply();
             if (!isOwner(who)) userStore.recordDelivered(who);
             preferences().edit().putInt("delivered", preferences().getInt("delivered", 0) + 1).apply();
+            reporter.finish(true, "");
         } catch (Exception e) {
-            try { sendText(chat, "این لینک قابل دریافت یا ارسال نبود. عمومی بودن ویدیو، حجم فایل و اینترنت گوشی را بررسی کن.", tok); }
-            catch (Exception ignored) { }
+            String friendly = e instanceof IllegalStateException && e.getMessage() != null
+                ? e.getMessage()
+                : "دانلود یا ارسال ناموفق بود. لینک، شبکه و حجم فایل را بررسی کن.";
+            reporter.finish(false, friendly);
         } finally {
             deleteRecursive(folder);
         }
     }
 
-    private void uploadDocument(long chat, File file, String tok) throws Exception {
+    private void uploadDocument(long chat, File file, String tok, ProgressReporter reporter)
+        throws Exception {
         String boundary = "Javid" + UUID.randomUUID().toString().replace("-", "");
         HttpURLConnection conn = (HttpURLConnection)new URL("https://api.telegram.org/bot" + tok + "/sendDocument").openConnection();
         conn.setRequestMethod("POST");
@@ -659,10 +674,17 @@ public final class TelegramBotService extends Service {
             try (InputStream input = new BufferedInputStream(new FileInputStream(file))) {
                 byte[] buf = new byte[64 * 1024];
                 int count;
-                while ((count = input.read(buf)) != -1) output.write(buf, 0, count);
+                long uploaded = 0;
+                long total = Math.max(1, file.length());
+                while ((count = input.read(buf)) != -1) {
+                    output.write(buf, 0, count);
+                    uploaded += count;
+                    reporter.percent(100f * uploaded / total);
+                }
             }
             output.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
         }
+        reporter.phase("confirming");
         int code = conn.getResponseCode();
         try (InputStream stream = code >= 200 && code < 300 ? conn.getInputStream() : conn.getErrorStream()) {
             if (stream == null) throw new Exception("Telegram upload failed: " + code);
@@ -679,6 +701,19 @@ public final class TelegramBotService extends Service {
         } finally { conn.disconnect(); }
     }
 
+    private void editText(long chat, int messageId, String text, String tok) throws Exception {
+        if (messageId <= 0) return;
+        api("editMessageText", new JSONObject()
+            .put("chat_id", chat)
+            .put("message_id", messageId)
+            .put("text", text), tok);
+    }
+    private void deleteText(long chat, int messageId, String tok) throws Exception {
+        if (messageId <= 0) return;
+        api("deleteMessage", new JSONObject()
+            .put("chat_id", chat)
+            .put("message_id", messageId), tok);
+    }
     private void sendText(long chat, String text, String tok) throws Exception {
         sendText(chat, text, null, tok);
     }
