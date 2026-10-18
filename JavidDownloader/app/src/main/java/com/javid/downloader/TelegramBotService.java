@@ -480,7 +480,7 @@ public final class TelegramBotService extends Service {
             // Immediately remove old inline buttons; subsequent edits update this SAME message.
             try {
                 editText(chat, promptId, "⏳ " + (audio ? "MP3" : "ویدیو تا " + height + "p") +
-                    "\\nدر حال آماده‌سازی دانلود...", tok);
+                    "\nدر حال آماده‌سازی دانلود...", tok);
             } catch (Exception ignored) { }
             reporter.start();
             try {
@@ -742,11 +742,16 @@ public final class TelegramBotService extends Service {
     }
 
     private void editText(long chat, int messageId, String text, String tok) throws Exception {
+        editText(chat, messageId, text, null, tok);
+    }
+    private void editText(long chat, int messageId, String text, JSONObject markup, String tok)
+        throws Exception {
         if (messageId <= 0) return;
-        api("editMessageText", new JSONObject()
-            .put("chat_id", chat)
-            .put("message_id", messageId)
-            .put("text", text), tok);
+        JSONObject params = new JSONObject()
+            .put("chat_id", chat).put("message_id", messageId).put("text", text);
+        // editMessageText clears the old inline keyboard when markup is absent.
+        if (markup != null) params.put("reply_markup", markup);
+        api("editMessageText", params, tok);
     }
     private void deleteText(long chat, int messageId, String tok) throws Exception {
         if (messageId <= 0) return;
