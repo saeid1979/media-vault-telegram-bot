@@ -29,6 +29,12 @@ android {
         }
     }
     buildTypes {
+        // Separate installable test app. Never use a fresh debug certificate to
+        // update the owner's stable app and lose access to existing app data.
+        debug {
+            applicationIdSuffix '.beta'
+            versionNameSuffix '-beta'
+        }
         release {
             if (stableKeyAvailable) {
                 signingConfig signingConfigs.stableRelease
