@@ -37,6 +37,12 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
+import kotlin.Unit;
+import kotlin.jvm.functions.Function3;
 import java.util.concurrent.atomic.AtomicInteger;
 import android.os.SystemClock;
 import java.util.regex.Matcher;
@@ -68,6 +74,69 @@ public final class TelegramBotService extends Service {
     };
     private final AtomicInteger queuedReplies = new AtomicInteger();
     private final ExecutorService downloadExecutor = Executors.newFixedThreadPool(2);
+    // Never edit Telegram for every yt-dlp callback: throttle progress to avoid flood limits.
+    private final ScheduledExecutorService progressExecutor =
+        Executors.newScheduledThreadPool(2);
+    private final class ProgressReporter {
+        final long chat;
+        final int messageId;
+        final String tok;
+        volatile int percent = 0;
+        volatile String stage = "download";
+        volatile String lastSent = "";
+        private ScheduledFuture<?> ticker;
+        private volatile boolean ended = false;
+        ProgressReporter(long chat, int messageId, String tok) {
+            this.chat = chat; this.messageId = messageId; this.tok = tok;
+        }
+        void start() {
+            if (messageId <= 0) return;
+            ticker = progressExecutor.scheduleAtFixedRate(this::tick, 0, 2, TimeUnit.SECONDS);
+        }
+        String statusText() {
+            int p = Math.max(0, Math.min(100, percent));
+            String label = "upload".equals(stage) ? "📤 ارسال به تلگرام" :
+                "processing".equals(stage) ? "🔄 آماده‌سازی فایل" :
+                "waiting".equals(stage) ? "⏳ در صف دانلود" : "⬇️ دانلود";
+            if ("processing".equals(stage) || "waiting".equals(stage)) return label + "…";
+            int blocks = Math.min(10, p / 10);
+            StringBuilder bar = new StringBuilder();
+            for (int i = 0; i < 10; i++) bar.append(i < blocks ? "■" : "□");
+            return label + ": " + p + "%\n" + bar;
+        }
+        private void tick() {
+            if (ended) return;
+            String now = statusText();
+            if (now.equals(lastSent)) return;
+            try {
+                editText(chat, messageId, now, tok);
+                lastSent = now;
+            } catch (Exception ignored) {
+                // A transient Telegram error must never cancel a successful download.
+            }
+        }
+        void phase(String value) { stage = value; }
+        void percent(float value) {
+            if (Float.isNaN(value) || Float.isInfinite(value)) return;
+            percent = Math.max(0, Math.min(100, Math.round(value)));
+        }
+        void finish(boolean success, String problem) {
+            ended = true;
+            if (ticker != null) ticker.cancel(false);
+            if (messageId <= 0) return;
+            if (success) {
+                // Leave the delivered file; remove only this bot-created temporary message.
+                try { deleteText(chat, messageId, tok); }
+                catch (Exception ignored) {
+                    try { editText(chat, messageId, "✅ فایل ارسال شد.", tok); }
+                    catch (Exception ignoredAgain) { }
+                }
+            } else {
+                try { editText(chat, messageId, "⚠️ " + problem, tok); }
+                catch (Exception ignored) { }
+            }
+        }
+    }
     private final AtomicInteger outstandingDownloads = new AtomicInteger();
     private final Map<Long, Boolean> userDownloads = new ConcurrentHashMap<>();
     private volatile boolean mediaInitialized = false;
@@ -215,6 +284,7 @@ public final class TelegramBotService extends Service {
         preferences().edit().putBoolean("enabled", false).apply();
         status("ربات متوقف است");
         downloadExecutor.shutdownNow();
+        progressExecutor.shutdownNow();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
@@ -340,6 +410,7 @@ public final class TelegramBotService extends Service {
             if (from == null || message == null) return;
             long who = from.optLong("id");
             long chat = message.getJSONObject("chat").optLong("id");
+            int promptId = message.optInt("message_id", 0);
             if (!canDownload(who)) {
                 sendText(chat, accessMessage(who), tok);
                 return;
@@ -352,31 +423,32 @@ public final class TelegramBotService extends Service {
                 sendText(chat, "درخواست منقضی شده، لینک را دوباره بفرست.", tok);
                 return;
             }
-            if (data.startsWith("rights:")) {
-                JSONObject buttons = keyboard(
-                    new JSONArray().put(new JSONObject().put("text", "ویدیو (تا 720p)")
-                        .put("callback_data", "fmt:" + parts[1] + ":v")),
-                    new JSONArray().put(new JSONObject().put("text", "فقط صدا MP3")
-                        .put("callback_data", "fmt:" + parts[1] + ":a"))
-                );
-                sendText(chat, "کدام فرمت را می‌خواهی؟", buttons, tok);
-            } else if (data.startsWith("fmt:") && parts.length == 3) {
+            if (data.startsWith("fmt:") && parts.length == 3) {
+                boolean audio = "a".equals(parts[2]);
+                if (!audio && !"v".equals(parts[2])) return;
                 if (userDownloads.putIfAbsent(who, true) != null) {
-                    sendText(chat, "یک دانلود دیگر برای شما در حال انجام یا انتظار است. بعد از پایان آن دوباره درخواست بده.", tok);
+                    editText(chat, promptId, "⏳ یک دانلود دیگر در حال انجام است؛ بعد از پایان، لینک جدید بفرست.", tok);
                     return;
                 }
                 int queued = outstandingDownloads.incrementAndGet();
                 if (queued > 8) {
                     outstandingDownloads.decrementAndGet();
                     userDownloads.remove(who);
-                    sendText(chat, "صف دانلود فعلاً پر است. لطفاً کمی بعد دوباره تلاش کن.", tok);
+                    editText(chat, promptId, "⏳ صف دانلود پر است. کمی بعد دوباره تلاش کن.", tok);
                     return;
                 }
-                pending.remove(parts[1]);
-                boolean audio = "a".equals(parts[2]);
+                // Remove the pending link to prevent second taps from starting duplicate jobs.
+                if (!pending.remove(parts[1], item)) {
+                    outstandingDownloads.decrementAndGet();
+                    userDownloads.remove(who);
+                    return;
+                }
+                ProgressReporter reporter = new ProgressReporter(chat, promptId, tok);
+                reporter.phase(queued > 2 ? "waiting" : "download");
+                reporter.start();
                 try {
                     downloadExecutor.execute(() -> {
-                        try { downloadAndSend(who, chat, item.url, audio, tok); }
+                        try { downloadAndSend(who, chat, item.url, audio, tok, reporter); }
                         finally {
                             userDownloads.remove(who);
                             outstandingDownloads.decrementAndGet();
@@ -385,15 +457,13 @@ public final class TelegramBotService extends Service {
                 } catch (java.util.concurrent.RejectedExecutionException stopped) {
                     outstandingDownloads.decrementAndGet();
                     userDownloads.remove(who);
-                    sendText(chat, "بات در حال توقف است؛ درخواست را بعداً تکرار کن.", tok);
-                    return;
+                    reporter.finish(false, "بات در حال توقف است، بعداً دوباره امتحان کن.");
                 }
-                sendText(chat, "✅ درخواست " + (audio ? "MP3" : "ویدیو") +
-                    " ثبت شد. " + (queued > 2 ? "در صف انتظار: " + (queued - 2) :
-                    "در حال دریافت فایل روی گوشی") + ".", tok);
             } else if (data.startsWith("cancel:")) {
-                pending.remove(parts[1]);
-                sendText(chat, "لغو شد.", tok);
+                if (pending.remove(parts[1], item)) {
+                    try { deleteText(chat, promptId, tok); }
+                    catch (Exception e) { editText(chat, promptId, "❌ لغو شد.", tok); }
+                }
             }
             return;
         }
@@ -480,14 +550,15 @@ public final class TelegramBotService extends Service {
         }
         String id = UUID.randomUUID().toString().substring(0, 12);
         pending.put(id, new PendingDownload(user, url));
-        JSONObject rights = keyboard(
-            new JSONArray().put(new JSONObject().put("text", "✅ اجازه دانلود دارم")
-                .put("callback_data", "rights:" + id)),
-            new JSONArray().put(new JSONObject().put("text", "لغو")
-                .put("callback_data", "cancel:" + id))
+        JSONObject formats = keyboard(
+            new JSONArray()
+                .put(new JSONObject().put("text", "🎬 ویدیو").put("callback_data", "fmt:" + id + ":v"))
+                .put(new JSONObject().put("text", "🎵 MP3").put("callback_data", "fmt:" + id + ":a")),
+            new JSONArray()
+                .put(new JSONObject().put("text", "❌ لغو").put("callback_data", "cancel:" + id))
         );
-        sendText(chat, "منبع: " + source +
-            "\nفقط در صورت مالکیت یا داشتن اجازه دانلود ادامه بده.", rights, tok);
+        // Exactly one format question. Selecting an option edits this SAME message.
+        sendText(chat, "📎 " + source + "\nچه فرمتی می‌خواهی؟", formats, tok);
     }
 
     private static JSONObject keyboard(JSONArray... rows) throws Exception {
