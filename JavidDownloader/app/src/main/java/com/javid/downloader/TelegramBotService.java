@@ -61,6 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
+    private static final String BUILD_LABEL = "Javid Downloader Android 1.5.3 · three video qualities";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -323,7 +324,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v1.5.3 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -346,7 +347,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v1.5.3 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -425,47 +426,75 @@ public final class TelegramBotService extends Service {
                 sendText(chat, "درخواست منقضی شده، لینک را دوباره بفرست.", tok);
                 return;
             }
-            if (data.startsWith("fmt:") && parts.length == 3) {
-                boolean audio = "a".equals(parts[2]);
-                if (!audio && !"v".equals(parts[2])) return;
-                if (userDownloads.putIfAbsent(who, true) != null) {
-                    editText(chat, promptId, "⏳ یک دانلود دیگر در حال انجام است؛ بعد از پایان، لینک جدید بفرست.", tok);
-                    return;
-                }
-                int queued = outstandingDownloads.incrementAndGet();
-                if (queued > 8) {
-                    outstandingDownloads.decrementAndGet();
-                    userDownloads.remove(who);
-                    editText(chat, promptId, "⏳ صف دانلود پر است. کمی بعد دوباره تلاش کن.", tok);
-                    return;
-                }
-                // Remove the pending link to prevent second taps from starting duplicate jobs.
-                if (!pending.remove(parts[1], item)) {
-                    outstandingDownloads.decrementAndGet();
-                    userDownloads.remove(who);
-                    return;
-                }
-                ProgressReporter reporter = new ProgressReporter(chat, promptId, tok);
-                reporter.phase(queued > 2 ? "waiting" : "download");
-                reporter.start();
-                try {
-                    downloadExecutor.execute(() -> {
-                        try { downloadAndSend(who, chat, item.url, audio, tok, reporter); }
-                        finally {
-                            userDownloads.remove(who);
-                            outstandingDownloads.decrementAndGet();
-                        }
-                    });
-                } catch (java.util.concurrent.RejectedExecutionException stopped) {
-                    outstandingDownloads.decrementAndGet();
-                    userDownloads.remove(who);
-                    reporter.finish(false, "بات در حال توقف است، بعداً دوباره امتحان کن.");
-                }
-            } else if (data.startsWith("cancel:")) {
+            if (data.startsWith("cancel:")) {
                 if (pending.remove(parts[1], item)) {
                     try { deleteText(chat, promptId, tok); }
                     catch (Exception e) { editText(chat, promptId, "❌ لغو شد.", tok); }
                 }
+                return;
+            }
+            if (data.startsWith("fmt:") && parts.length == 3) {
+                if ("v".equals(parts[2])) {
+                    JSONObject qualities = keyboard(
+                        new JSONArray()
+                            .put(new JSONObject().put("text", "1080p").put("callback_data", "quality:" + parts[1] + ":1080"))
+                            .put(new JSONObject().put("text", "720p").put("callback_data", "quality:" + parts[1] + ":720"))
+                            .put(new JSONObject().put("text", "480p").put("callback_data", "quality:" + parts[1] + ":480")),
+                        new JSONArray()
+                            .put(new JSONObject().put("text", "🎵 MP3").put("callback_data", "fmt:" + parts[1] + ":a"))
+                            .put(new JSONObject().put("text", "❌ لغو").put("callback_data", "cancel:" + parts[1]))
+                    );
+                    editText(chat, promptId, "🎬 کیفیت ویدیو را انتخاب کن (حداکثر کیفیت در دسترس):", qualities, tok);
+                    return;
+                }
+                if (!"a".equals(parts[2])) return;
+            } else if (!data.startsWith("quality:") || parts.length != 3) {
+                return;
+            }
+            final boolean audio = data.startsWith("fmt:");
+            final int height;
+            if (audio) height = 0;
+            else {
+                try { height = Integer.parseInt(parts[2]); }
+                catch (NumberFormatException e) { return; }
+                if (height != 1080 && height != 720 && height != 480) return;
+            }
+            if (userDownloads.putIfAbsent(who, true) != null) {
+                editText(chat, promptId, "⏳ دانلود قبلی شما هنوز در حال انجام است.", tok);
+                return;
+            }
+            int queued = outstandingDownloads.incrementAndGet();
+            if (queued > 8) {
+                outstandingDownloads.decrementAndGet();
+                userDownloads.remove(who);
+                editText(chat, promptId, "⏳ صف دانلود پر است. کمی بعد دوباره تلاش کن.", tok);
+                return;
+            }
+            if (!pending.remove(parts[1], item)) {
+                outstandingDownloads.decrementAndGet();
+                userDownloads.remove(who);
+                return;
+            }
+            ProgressReporter reporter = new ProgressReporter(chat, promptId, tok);
+            reporter.phase(queued > 2 ? "waiting" : "download");
+            // Immediately remove old inline buttons; subsequent edits update this SAME message.
+            try {
+                editText(chat, promptId, "⏳ " + (audio ? "MP3" : "ویدیو تا " + height + "p") +
+                    "\\nدر حال آماده‌سازی دانلود...", tok);
+            } catch (Exception ignored) { }
+            reporter.start();
+            try {
+                downloadExecutor.execute(() -> {
+                    try { downloadAndSend(who, chat, item.url, audio, height, tok, reporter); }
+                    finally {
+                        userDownloads.remove(who);
+                        outstandingDownloads.decrementAndGet();
+                    }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException stopped) {
+                outstandingDownloads.decrementAndGet();
+                userDownloads.remove(who);
+                reporter.finish(false, "بات متوقف شد؛ درخواست را دوباره ارسال کن.");
             }
             return;
         }
@@ -513,13 +542,18 @@ public final class TelegramBotService extends Service {
                 return;
             }
         }
+        if (text.equals("/version") || text.startsWith("/version@")) {
+            sendText(chat, "✅ " + BUILD_LABEL +
+                "\nاین پاسخ از موتور جدید اندروید است. بات قدیمی نباید هم‌زمان فعال باشد.", tok);
+            return;
+        }
         if (text.startsWith("/start") || text.startsWith("/help")) {
             sendText(chat, "سلام 👋\nلینک ویدیوی عمومی و مجاز را بفرست، حق دانلود را تأیید کن و ویدیو یا MP3 را انتخاب کن.\n"
                     + "/status: وضعیت بات\n/profile: حساب و سهمیه", tok);
             return;
         }
         if (text.startsWith("/status")) {
-            sendText(chat, "✅ بات روی گوشی Javid Downloader فعال است.", tok);
+            sendText(chat, "✅ بات روی گوشی Javid Downloader فعال است.\nنسخه موتور: " + BUILD_LABEL, tok);
             return;
         }
         if (text.startsWith("/speed") && isOwner(user)) {
@@ -577,7 +611,7 @@ public final class TelegramBotService extends Service {
         return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
     }
 
-    private void downloadAndSend(long who, long chat, String link, boolean audio,
+    private void downloadAndSend(long who, long chat, String link, boolean audio, int height,
                                  String tok, ProgressReporter reporter) {
         File folder = new File(getExternalFilesDir(null), "bot-work/" + UUID.randomUUID());
         try {
@@ -604,8 +638,14 @@ public final class TelegramBotService extends Service {
                 request.addOption("--audio-format", "mp3");
                 request.addOption("--audio-quality", "5");
             } else {
-                // Prefer one-file MP4 when available; it avoids a costly phone-side merge.
-                request.addOption("-f", "b[height<=720][ext=mp4]/b[height<=720]/bv*[height<=720]+ba/b[height<=720]/best");
+                // Best video+audio up to the chosen ceiling; may use a lower source quality.
+                // YouTube often provides 1080p only as separate video/audio streams.
+                String maxHeight = String.valueOf(height);
+                String fmt = "bv*[height<=" + maxHeight + "][ext=mp4]+ba[ext=m4a]" +
+                    "/bv*[height<=" + maxHeight + "]+ba" +
+                    "/b[height<=" + maxHeight + "][ext=mp4]" +
+                    "/b[height<=" + maxHeight + "]";
+                request.addOption("-f", fmt);
                 request.addOption("--merge-output-format", "mp4");
             }
             Function3<Float, Long, String, Unit> track = (p, eta, output) -> {
