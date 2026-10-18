@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v1.4", LAVENDER, INK));
+        header.addView(badge("v1.5", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -379,7 +379,15 @@ public class MainActivity extends Activity {
         });
         botCard.addView(wifiOnly);
         botCard.addView(gap(13));
-        botCard.addView(label("این مرحله فقط حالت شخصی بات را فعال می‌کند. امکانات کاربران عمومی، VIP و مدیریت کامل بات پایتونی در مرحله بعد منتقل می‌شوند.",
+        botCard.addView(label("اعضا و انتقال کاربران قبلی", 15, INK, true));
+        botCard.addView(gap(6));
+        botCard.addView(label("ثبت کاربران قدیمی با Telegram ID، حفظ VIP و سهمیه و پشتیبان‌گیری از اعضا", 12, MUTED, false));
+        botCard.addView(gap(9));
+        Button manageUsers = styledButton("👥  مدیریت و انتقال کاربران", Color.rgb(221, 235, 252), INK, 14, 13);
+        botCard.addView(manageUsers, new LinearLayout.LayoutParams(-1, dp(55)));
+        manageUsers.setOnClickListener(v -> startActivity(new Intent(this, UserManagerActivity.class)));
+        botCard.addView(gap(13));
+        botCard.addView(label("کاربران ثبت‌شده و تأییدشده اکنون می‌توانند از بات استفاده کنند. انتقال داده‌های برنامه قدیمی نیاز به ورود اطلاعات یا فایل پشتیبان سازگار دارد.",
             12, MUTED, false));
         botCard.addView(gap(8));
         botCard.addView(label("برای جلوگیری از خطای Telegram 409، بات را هم‌زمان روی سرور قبلی اجرا نکن. روشن‌ماندن گوشی و محدودیت‌های پس‌زمینه اندروید بر دسترس‌پذیری بات اثر دارند.",
@@ -415,7 +423,7 @@ public class MainActivity extends Activity {
         settings.addView(label("پلتفرم‌های پشتیبانی‌شده", 15, INK, true));
         settings.addView(label("YouTube · Instagram · Facebook · TikTok · X\nPinterest · Vimeo · Reddit · Dailymotion · Twitch", 12, MUTED, false));
         settings.addView(gap(16));
-        settings.addView(label("Javid Downloader 1.4.0", 13, INK, true));
+        settings.addView(label("Javid Downloader 1.5.0", 13, INK, true));
         settings.addView(label("بدون حساب کاربری و بدون سرور اختصاصی", 12, MUTED, false));
         morePanel.addView(settings);
         content.addView(morePanel);
