@@ -62,6 +62,18 @@ public final class TelegramBotService extends Service {
     private final Map<String, PendingDownload> pending = new ConcurrentHashMap<>();
     private volatile boolean running = false;
     private volatile HttpURLConnection pollConnection;
+    private BotUserStore userStore;
+    private boolean isOwner(long who) { return who == preferences().getLong("owner_id", 0L); }
+    private boolean canDownload(long who) {
+        return isOwner(who) || BotUserStore.allowed(userStore.find(who));
+    }
+    private String accessMessage(long who) {
+        BotUserStore.User u = userStore.find(who);
+        if (u == null || !u.active) return "حساب شما هنوز توسط مدیر بات تأیید نشده است.";
+        if (u.blocked) return "حساب شما برای دریافت فایل مسدود شده است.";
+        if (!BotUserStore.allowed(u)) return "سهمیه دانلود امروز شما تمام شده است.";
+        return "";
+    }
 
     private static final class PendingDownload {
         final long owner;
@@ -108,6 +120,7 @@ public final class TelegramBotService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        userStore = new BotUserStore(this);
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
             NotificationChannel chan = new NotificationChannel(CHANNEL, "ربات تلگرام جاوید",
@@ -262,7 +275,10 @@ public final class TelegramBotService extends Service {
             if (from == null || message == null) return;
             long who = from.optLong("id");
             long chat = message.getJSONObject("chat").optLong("id");
-            if (who != preferences().getLong("owner_id", 0)) return;
+            if (!canDownload(who)) {
+                sendText(chat, accessMessage(who), tok);
+                return;
+            }
             String data = callback.optString("data", "");
             String[] parts = data.split(":");
             if (parts.length < 2) return;
@@ -284,7 +300,7 @@ public final class TelegramBotService extends Service {
                 boolean audio = "a".equals(parts[2]);
                 sendText(chat, "درخواست " + (audio ? "MP3" : "ویدیو") +
                     " دریافت شد؛ دانلود در گوشی شروع می‌شود.", tok);
-                downloadExecutor.execute(() -> downloadAndSend(chat, item.url, audio, tok));
+                downloadExecutor.execute(() -> downloadAndSend(who, chat, item.url, audio, tok));
             } else if (data.startsWith("cancel:")) {
                 pending.remove(parts[1]);
                 sendText(chat, "لغو شد.", tok);
@@ -323,16 +339,36 @@ public final class TelegramBotService extends Service {
             return;
         }
         if (owner != user) {
-            if (text.startsWith("/start")) sendText(chat, "این نسخه آزمایشی فعلاً فقط برای مالک دستگاه فعال است.", tok);
-            return;
+            String uname = from.optString("username", from.optString("first_name", ""));
+            userStore.pending(user, uname);
+            if (!canDownload(user)) {
+                // Registered users keep their old Telegram IDs; approval must be explicit.
+                if (text.startsWith("/start") || text.startsWith("/status") ||
+                    text.startsWith("/profile")) {
+                    sendText(chat, accessMessage(user) +
+                        "\nدر صورت نیاز با مدیر بات تماس بگیر.", tok);
+                } else sendText(chat, accessMessage(user), tok);
+                return;
+            }
         }
         if (text.startsWith("/start") || text.startsWith("/help")) {
             sendText(chat, "سلام 👋\nلینک ویدیوی عمومی و مجاز را بفرست، حق دانلود را تأیید کن و ویدیو یا MP3 را انتخاب کن.\n"
-                    + "/status: وضعیت بات\nاین نسخه موبایلی فعلاً مخصوص مالک است.", tok);
+                    + "/status: وضعیت بات\n/profile: حساب و سهمیه", tok);
             return;
         }
         if (text.startsWith("/status")) {
             sendText(chat, "✅ بات روی گوشی Javid Downloader فعال است.", tok);
+            return;
+        }
+        if (text.startsWith("/profile") || text.startsWith("/limits")) {
+            BotUserStore.User info = userStore.find(user);
+            String profile = isOwner(user) ? "مالک · نامحدود" : info == null ? "ثبت نشده" :
+                "نقش: " + info.role + "\nدانلودهای ثبت‌شده: " + info.totalDownloads +
+                "\nسهمیه روزانه: " + BotUserStore.quota(info) +
+                "\nمصرف امروز: " + (new java.text.SimpleDateFormat("yyyy-MM-dd",
+                    java.util.Locale.US).format(new java.util.Date()).equals(info.counterDay)
+                    ? info.todayDownloads : 0);
+            sendText(chat, "📊 وضعیت حساب\n" + profile, tok);
             return;
         }
         Matcher matcher = LINK.matcher(text);
@@ -368,9 +404,13 @@ public final class TelegramBotService extends Service {
         return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
     }
 
-    private void downloadAndSend(long chat, String link, boolean audio, String tok) {
+    private void downloadAndSend(long who, long chat, String link, boolean audio, String tok) {
         File folder = new File(getExternalFilesDir(null), "bot-work/" + UUID.randomUUID());
         try {
+            if (!canDownload(who)) {
+                sendText(chat, accessMessage(who), tok);
+                return;
+            }
             if (preferences().getBoolean("wifi_only", true) && !onWifi()) {
                 sendText(chat, "برای جلوگیری از مصرف اینترنت سیم‌کارت، دانلود بات فقط روی Wi-Fi فعال است. می‌توانی این تنظیم را در اپ تغییر دهی.", tok);
                 return;
@@ -408,6 +448,7 @@ public final class TelegramBotService extends Service {
             }
             sendText(chat, "دانلود تمام شد. فایل در حال ارسال به تلگرام است...", tok);
             uploadDocument(chat, best, tok);
+            if (!isOwner(who)) userStore.recordDelivered(who);
             preferences().edit().putInt("delivered", preferences().getInt("delivered", 0) + 1).apply();
         } catch (Exception e) {
             try { sendText(chat, "این لینک قابل دریافت یا ارسال نبود. عمومی بودن ویدیو، حجم فایل و اینترنت گوشی را بررسی کن.", tok); }
