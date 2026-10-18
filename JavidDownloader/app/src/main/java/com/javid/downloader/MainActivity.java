@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v1.5", LAVENDER, INK));
+        header.addView(badge("v1.5.3", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -423,7 +423,7 @@ public class MainActivity extends Activity {
         settings.addView(label("پلتفرم‌های پشتیبانی‌شده", 15, INK, true));
         settings.addView(label("YouTube · Instagram · Facebook · TikTok · X\nPinterest · Vimeo · Reddit · Dailymotion · Twitch", 12, MUTED, false));
         settings.addView(gap(16));
-        settings.addView(label("Javid Downloader 1.5.0", 13, INK, true));
+        settings.addView(label("Javid Downloader 1.5.3", 13, INK, true));
         settings.addView(label("بدون حساب کاربری و بدون سرور اختصاصی", 12, MUTED, false));
         morePanel.addView(settings);
         content.addView(morePanel);
