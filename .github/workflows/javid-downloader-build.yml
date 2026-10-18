@@ -50,6 +50,10 @@ jobs:
             gradle --no-daemon :app:assembleRelease
             cp app/build/outputs/apk/release/app-release-unsigned.apk outputs/JavidDownloader-v1.5.3-UNSIGNED-FOR-LOCAL-SIGNING.apk
           fi
+      - name: Build separate installable beta (does not replace stable app)
+        run: |
+          gradle --no-daemon :app:assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk outputs/JavidDownloader-v1.5.3-BETA-INSTALLABLE.apk
       - name: Upload APK build
         uses: actions/upload-artifact@v4
         with:
