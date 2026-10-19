@@ -15,7 +15,7 @@ import java.util.Locale;
 /** Private device database. Accounts start inactive until approved by the owner. */
 public final class BotUserStore extends SQLiteOpenHelper {
     private static final String NAME = "javid_bot_users_v1.db";
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     public BotUserStore(Context context) { super(context, NAME, null, VERSION); }
 
     public static final class User {
@@ -30,6 +30,7 @@ public final class BotUserStore extends SQLiteOpenHelper {
         public String counterDay = "";
         public String source = "manual";
         public String vipExpiresOn = ""; // YYYY-MM-DD, empty = no expiry
+        public boolean digestSubscribed; // voluntary Telegram private update opt-in
     }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE bot_users (" +
@@ -39,13 +40,16 @@ public final class BotUserStore extends SQLiteOpenHelper {
             "total_downloads INTEGER NOT NULL DEFAULT 0," +
             "today_downloads INTEGER NOT NULL DEFAULT 0,counter_day TEXT NOT NULL DEFAULT ''," +
             "source TEXT NOT NULL DEFAULT 'manual',updated_at INTEGER NOT NULL DEFAULT 0," +
-            "vip_expires_on TEXT NOT NULL DEFAULT '')");
+            "vip_expires_on TEXT NOT NULL DEFAULT ''," +
+            "digest_subscribed INTEGER NOT NULL DEFAULT 0)");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         // Non-destructive schema upgrade: preserve the existing 18 imported users,
         // their roles, quotas and counters. Existing VIP accounts remain indefinite.
         if (oldVersion < 2) db.execSQL(
             "ALTER TABLE bot_users ADD COLUMN vip_expires_on TEXT NOT NULL DEFAULT ''");
+        if (oldVersion < 3) db.execSQL(
+            "ALTER TABLE bot_users ADD COLUMN digest_subscribed INTEGER NOT NULL DEFAULT 0");
     }
 
     private static String today() {
@@ -60,10 +64,11 @@ public final class BotUserStore extends SQLiteOpenHelper {
         u.todayDownloads = c.getInt(7);
         u.counterDay = c.getString(8); u.source = c.getString(9);
         u.vipExpiresOn = c.getString(10);
+        u.digestSubscribed = c.getInt(11) != 0;
         return u;
     }
     private static final String SELECT = "SELECT user_id,username,role,active,blocked,daily_limit," +
-        "total_downloads,today_downloads,counter_day,source,vip_expires_on FROM bot_users";
+        "total_downloads,today_downloads,counter_day,source,vip_expires_on,digest_subscribed FROM bot_users";
 
     public synchronized User find(long id) {
         try (Cursor c = getReadableDatabase().rawQuery(SELECT + " WHERE user_id=?",
@@ -119,6 +124,7 @@ public final class BotUserStore extends SQLiteOpenHelper {
         v.put("counter_day", u.counterDay == null ? "" : u.counterDay);
         v.put("source", u.source == null ? "manual" : u.source);
         v.put("vip_expires_on", u.vipExpiresOn == null ? "" : u.vipExpiresOn);
+        v.put("digest_subscribed", u.digestSubscribed ? 1 : 0);
         v.put("updated_at", System.currentTimeMillis());
         db.insertWithOnConflict("bot_users", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
@@ -155,6 +161,22 @@ public final class BotUserStore extends SQLiteOpenHelper {
         u.todayDownloads++;
         save(u);
     }
+    /** Only active, unblocked members with an explicit private-feed opt-in. */
+    public synchronized java.util.List<User> digestRecipients() {
+        java.util.List<User> list = new java.util.ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery(
+            SELECT + " WHERE active=1 AND blocked=0 AND digest_subscribed=1 ORDER BY user_id",
+            null)) {
+            while (c.moveToNext()) list.add(from(c));
+        }
+        return list;
+    }
+    public synchronized void setDigestOptIn(long userId, boolean enabled, String username) {
+        User u = find(userId);
+        if (u == null) u = pending(userId, username);
+        u.digestSubscribed = enabled;
+        save(u);
+    }
     public static JSONObject toJson(User u) throws Exception {
         JSONObject row = new JSONObject();
         row.put("user_id", u.id);
@@ -167,6 +189,7 @@ public final class BotUserStore extends SQLiteOpenHelper {
         row.put("today_count", u.todayDownloads);
         row.put("counter_day", u.counterDay);
         row.put("vip_expires_on", u.vipExpiresOn);
+        row.put("digest_subscribed", u.digestSubscribed);
         return row;
     }
     public synchronized byte[] exportJson() throws Exception {
@@ -200,6 +223,7 @@ public final class BotUserStore extends SQLiteOpenHelper {
         u.todayDownloads = Math.max(0, row.optInt("today_count", 0));
         u.counterDay = row.optString("counter_day", "");
         u.vipExpiresOn = row.optString("vip_expires_on", "");
+        u.digestSubscribed = row.optBoolean("digest_subscribed", false);
         if (!validExpiry(u.vipExpiresOn))
             throw new IllegalArgumentException("Invalid VIP expiry");
         u.source = "import";
