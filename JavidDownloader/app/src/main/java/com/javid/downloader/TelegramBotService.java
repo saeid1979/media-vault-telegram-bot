@@ -61,7 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 1.8.0 · download history and source audit";
+    private static final String BUILD_LABEL = "Javid Downloader Android 1.9.0 · hourly world updates";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -78,6 +78,10 @@ public final class TelegramBotService extends Service {
     // Never edit Telegram for every yt-dlp callback: throttle progress to avoid flood limits.
     private final ScheduledExecutorService progressExecutor =
         Executors.newScheduledThreadPool(2);
+    private final ScheduledExecutorService digestExecutor =
+        Executors.newSingleThreadScheduledExecutor();
+    private final java.util.concurrent.atomic.AtomicBoolean digestSending =
+        new java.util.concurrent.atomic.AtomicBoolean();
     private final class ProgressReporter {
         final long chat;
         final int messageId;
@@ -194,6 +198,7 @@ public final class TelegramBotService extends Service {
     private BotUserStore userStore;
     private BotStatsStore botStats;
     private BotDownloadLogStore audit;
+    private HourlyDigestPublisher digests;
     private void publishQueue() {
         preferences().edit().putInt("current_downloads",
             Math.max(0, outstandingDownloads.get())).apply();
@@ -258,6 +263,7 @@ public final class TelegramBotService extends Service {
         userStore = new BotUserStore(this);
         botStats = new BotStatsStore(this);
         audit = new BotDownloadLogStore(this);
+        digests = new HourlyDigestPublisher(this, preferences(), userStore);
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
             NotificationChannel chan = new NotificationChannel(CHANNEL, "ربات تلگرام جاوید",
@@ -288,6 +294,14 @@ public final class TelegramBotService extends Service {
             try { ensureMediaReady(); } catch (Exception ignored) { /* surfaced at download time */ }
         });
         pollExecutor.execute(this::loop);
+        // In-app hourly publication depends on the Android foreground bot
+        // continuing to run. Database last-hour marker survives service restart.
+        digestExecutor.scheduleAtFixedRate(() -> {
+            if (!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED, false)) return;
+            try { publishDigest(false, 0L, null); }
+            catch (Exception ignored) { }
+        }, HourlyDigestPublisher.millisUntilNextHour(),
+           HourlyDigestPublisher.HOUR_MS, TimeUnit.MILLISECONDS);
         return START_NOT_STICKY;
     }
 
@@ -299,6 +313,7 @@ public final class TelegramBotService extends Service {
         status("ربات متوقف است");
         downloadExecutor.shutdownNow();
         progressExecutor.shutdownNow();
+        digestExecutor.shutdownNow();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
@@ -311,6 +326,7 @@ public final class TelegramBotService extends Service {
         pollExecutor.shutdownNow();
         downloadExecutor.shutdownNow();
         progressExecutor.shutdownNow();
+        digestExecutor.shutdownNow();
         if (botStats != null) botStats.close();
         if (userStore != null) userStore.close();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
@@ -331,6 +347,36 @@ public final class TelegramBotService extends Service {
         return result;
     }
 
+    /**
+     * Runs only on digestExecutor. testChat sends the post-run summary to the
+     * owner, whereas the hourly task quietly stores status in preferences.
+     */
+    private void publishDigest(boolean manual, long testChat, String token) {
+        if (!digestSending.compareAndSet(false, true)) {
+            if (manual && token != null) {
+                try { sendText(testChat, "خبرنامه در حال آماده‌سازی یا ارسال است.", token); }
+                catch (Exception ignored) { }
+            }
+            return;
+        }
+        try {
+            String secret = token != null ? token : token();
+            HourlyDigestPublisher.Report result = digests.publish(secret, manual);
+            if (manual) sendText(testChat, "📬 نتیجه ارسال خبرنامه:\n" +
+                result.status() + "\n" +
+                preferences().getString(HourlyDigestPublisher.LAST_RESULT,
+                    result.content == null ? "بدون نتیجه" : result.content), secret);
+        } catch (Exception failure) {
+            preferences().edit().putString(HourlyDigestPublisher.LAST_RESULT,
+                "خطا در ساخت یا ارسال گزارش؛ اتصال داده‌ها و بات را بررسی کنید.").apply();
+            if (manual && token != null)
+                try { sendText(testChat, "⚠️ گزارش آماده یا ارسال نشد. اتصال اینترنت را بررسی کن.", token); }
+                catch (Exception ignored) { }
+        } finally {
+            digestSending.set(false);
+        }
+    }
+
     private void loop() {
         long cursor = preferences().getLong("update_id", 0L);
         try {
@@ -338,7 +384,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v1.8.0 · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v1.9.0 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -361,7 +407,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · v1.8.0 · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v1.9.0 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -571,6 +617,105 @@ public final class TelegramBotService extends Service {
                 "آمار کلی و مشخصات حساب دست‌نخورده است.", tok);
             return;
         }
+        // Private digest is opt-in, and only an already approved member
+        // can subscribe. Channel publication is configured separately by owner.
+        if (text.equals("/digestjoin") || text.startsWith("/digestjoin@")) {
+            BotUserStore.User member = userStore.find(user);
+            if (!isOwner(user) && (member == null || !member.active || member.blocked)) {
+                sendText(chat, "عضویت در خبرنامه بعد از تأیید حساب بات ممکن است.", tok);
+                return;
+            }
+            String username = from.optString("username", from.optString("first_name", ""));
+            userStore.setDigestOptIn(user, true, username);
+            sendText(chat, "✅ خبرنامه ساعتی فعال شد. خبرهای فوتبال، هوای سالامانکا و اردبیل و تیترهای ایران را دریافت می‌کنی.\nبرای توقف: /digestleave", tok);
+            return;
+        }
+        if (text.equals("/digestleave") || text.startsWith("/digestleave@")) {
+            BotUserStore.User member = userStore.find(user);
+            if (member != null) userStore.setDigestOptIn(user, false, member.username);
+            sendText(chat, "🔕 خبرنامه خصوصی برای شما خاموش شد.", tok);
+            return;
+        }
+        if (text.equals("/digesthelp") || text.startsWith("/digesthelp@")) {
+            sendText(chat, "📰 خبرنامه ساعتی Downloaderjavid\n" +
+                "/digestjoin عضویت داوطلبانه\n/digestleave لغو پیام خصوصی\n" +
+                (isOwner(user) ? "مدیریت:\n/digestto @ChannelName تنظیم کانال\n" +
+                    "/digeston فعال‌سازی ساعتی\n/digestoff توقف انتشار\n" +
+                    "/digestpreview پیش‌نمایش واقعی\n/digestnow ارسال فوری\n/digeststatus وضعیت" :
+                    "خبرها از منابع عمومی با ذکر منبع تهیه می‌شوند."), tok);
+            return;
+        }
+        if (text.startsWith("/digest") && isOwner(user)) {
+            if (text.startsWith("/digestto ")) {
+                String target = text.substring("/digestto ".length()).trim();
+                if (!HourlyDigestPublisher.channelValid(target)) {
+                    sendText(chat, "نام کانال باید مانند @Downloaderjavid یا شناسه -100... باشد.", tok);
+                    return;
+                }
+                preferences().edit().putString(HourlyDigestPublisher.TARGET, target).apply();
+                sendText(chat, "✅ کانال ذخیره شد: " + target +
+                    "\nبات باید مدیر کانال با دسترسی انتشار پست باشد.\n" +
+                    "برای امتحان: /digestpreview سپس /digeston", tok);
+                return;
+            }
+            if (text.equals("/digestoff")) {
+                preferences().edit().putBoolean(HourlyDigestPublisher.ENABLED, false).apply();
+                sendText(chat, "⏸ انتشار خبرنامه ساعتی متوقف شد.", tok);
+                return;
+            }
+            if (text.equals("/digeston")) {
+                boolean channel = HourlyDigestPublisher.channelValid(
+                    preferences().getString(HourlyDigestPublisher.TARGET, ""));
+                if (!channel && userStore.digestRecipients().isEmpty()) {
+                    sendText(chat, "ابتدا کانال را با /digestto @ChannelName تعیین کن " +
+                        "یا یک کاربر تأییدشده با /digestjoin عضو شود.", tok);
+                    return;
+                }
+                preferences().edit().putBoolean(HourlyDigestPublisher.ENABLED, true).apply();
+                sendText(chat, "✅ انتشار ساعتی روشن شد. اولین انتشار خودکار ابتدای ساعت بعد، " +
+                    "به وقت اسپانیا است؛ تا وقتی سرویس بات روی گوشی فعال بماند.\n" +
+                    "برای ارسال همین حالا: /digestnow", tok);
+                return;
+            }
+            if (text.equals("/digeststatus")) {
+                String target = preferences().getString(HourlyDigestPublisher.TARGET, "");
+                long last = preferences().getLong(HourlyDigestPublisher.LAST_SENT, 0);
+                String when = last == 0 ? "هنوز ارسال نشده" :
+                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US)
+                    .format(new java.util.Date(last));
+                sendText(chat, "📰 وضعیت خبرنامه\nساعتی: " +
+                    (preferences().getBoolean(HourlyDigestPublisher.ENABLED, false) ? "روشن" : "خاموش") +
+                    "\nکانال: " + (target.isEmpty() ? "تنظیم نشده" : target) +
+                    "\nدریافت‌کنندگان خصوصی: " + userStore.digestRecipients().size() +
+                    "\nآخرین ارسال: " + when +
+                    "\nنتیجه: " + preferences().getString(HourlyDigestPublisher.LAST_RESULT, "—"), tok);
+                return;
+            }
+            if (text.equals("/digestpreview")) {
+                sendText(chat, "⏳ در حال دریافت جدیدترین داده‌ها؛ کمی صبر کن...", tok);
+                digestExecutor.execute(() -> {
+                    try {
+                        HourlyDigestPublisher.Report report = digests.build();
+                        sendText(chat, report.content, tok);
+                    } catch (Exception ignored) {
+                        try { sendText(chat, "⚠️ ساخت پیش‌نمایش موفق نبود. اتصال اینترنت را بررسی کن.", tok); }
+                        catch (Exception ignoredAgain) { }
+                    }
+                });
+                return;
+            }
+            if (text.equals("/digestnow")) {
+                if (!preferences().getBoolean(HourlyDigestPublisher.ENABLED, false)) {
+                    sendText(chat, "ابتدا خبرنامه را با /digeston فعال کن.", tok);
+                    return;
+                }
+                sendText(chat, "⏳ انتشار فوری در حال اجراست؛ نتیجه بعد از ارسال می‌آید.", tok);
+                digestExecutor.execute(() -> publishDigest(true, chat, tok));
+                return;
+            }
+            sendText(chat, "برای مشاهده دستورات خبرنامه: /digesthelp", tok);
+            return;
+        }
         if (owner != user) {
             String uname = from.optString("username", from.optString("first_name", ""));
             userStore.pending(user, uname);
@@ -592,7 +737,8 @@ public final class TelegramBotService extends Service {
         if (text.startsWith("/start") || text.startsWith("/help")) {
             sendText(chat, "سلام 👋\nلینک ویدیوی عمومی و مجاز را بفرست، حق دانلود را تأیید کن و ویدیو یا MP3 را انتخاب کن.\n"
                     + "/status: وضعیت بات\n/profile: حساب و سهمیه" +
-                    "\n/privacy: نحوه ثبت تاریخچه\n/forgetmyhistory: حذف گزارش جزئی خود", tok);
+                    "\n/privacy: نحوه ثبت تاریخچه\n/forgetmyhistory: حذف گزارش جزئی خود" +
+                    "\n/digesthelp: خبرنامه ساعتی فوتبال، هوا و اخبار ایران", tok);
             return;
         }
         if (text.startsWith("/status")) {
