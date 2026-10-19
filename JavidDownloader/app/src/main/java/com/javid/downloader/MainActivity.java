@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v1.7", LAVENDER, INK));
+        header.addView(badge("v1.7.1", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -773,7 +773,9 @@ public class MainActivity extends Activity {
                     // selected format. Retry once using the best available format.
                     // Do not retry authentication, private, restricted, or DRM errors.
                     boolean unavailable = failure.contains("requested format is not available") ||
-                        failure.contains("requested format not available");
+                        failure.contains("requested format not available") ||
+                        failure.contains("requested formats") ||
+                        failure.contains("no video formats found");
                     if (chosen == 5 || chosen == 0 || !unavailable) throw firstError;
                     runOnUiThread(() -> {
                         progress.setProgress(0);
@@ -788,7 +790,12 @@ public class MainActivity extends Activity {
                     fallback.addOption("--no-playlist");
                     fallback.addOption("--no-mtime");
                     fallback.addOption("-o", new File(job, "%(title).130B [%(id)s].%(ext)s").getAbsolutePath());
-                    fallback.addOption("-f", "bv*+ba/b");
+                    // Prefer the closest resolution when a provider does not
+                    // report its format height (common in Instagram reels).
+                    int desired = chosen == 1 ? 1080 : chosen == 2 ? 720 :
+                        chosen == 3 ? 480 : 360;
+                    fallback.addOption("-f", "b/bv*+ba");
+                    fallback.addOption("-S", "res:" + desired + ",ext:mp4");
                     fallback.addOption("--merge-output-format", "mp4");
                     last[0] = 0;
                     YoutubeDL.getInstance().execute(fallback, processId, onProgress);
