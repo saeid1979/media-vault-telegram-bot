@@ -65,7 +65,7 @@ public final class BotDownloadLogStore extends SQLiteOpenHelper {
     public static String titleFromFilename(String name) {
         String value = clean(name, 240);
         // yt-dlp naming scheme: %(title).110B [%(id)s].%(ext)s
-        value = value.replaceFirst(" \\[\\[[^\\]]{1,100}\\]\\.[a-zA-Z0-9]{1,8}$", "");
+        value = value.replaceFirst(" \\[[^\\]]{1,100}\\]\\.[A-Za-z0-9]{1,8}$", "");
         if (value.equals(name)) value = value.replaceFirst("\\.[a-zA-Z0-9]{1,8}$", "");
         return clean(value, 150);
     }
