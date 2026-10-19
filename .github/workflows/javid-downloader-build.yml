@@ -44,20 +44,20 @@ jobs:
             chmod 600 "$RUNNER_TEMP/javid-release.jks"
             export JAVID_SIGNING_STORE_FILE="$RUNNER_TEMP/javid-release.jks"
             gradle --no-daemon :app:assembleRelease
-            cp app/build/outputs/apk/release/app-release.apk outputs/JavidDownloader-v1.5.3-STABLE-RELEASE.apk
+            cp app/build/outputs/apk/release/app-release.apk outputs/JavidDownloader-v1.6.0-STABLE-RELEASE.apk
           else
             echo "::warning::Configure GitHub Actions secrets JAVID_KEYSTORE_B64 and JAVID_SIGN_PASSWORD to create stable update APKs"
             gradle --no-daemon :app:assembleRelease
-            cp app/build/outputs/apk/release/app-release-unsigned.apk outputs/JavidDownloader-v1.5.3-UNSIGNED-FOR-LOCAL-SIGNING.apk
+            cp app/build/outputs/apk/release/app-release-unsigned.apk outputs/JavidDownloader-v1.6.0-UNSIGNED-FOR-LOCAL-SIGNING.apk
           fi
       - name: Build separate installable beta (does not replace stable app)
         run: |
           gradle --no-daemon :app:assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk outputs/JavidDownloader-v1.5.3-BETA-INSTALLABLE.apk
+          cp app/build/outputs/apk/debug/app-debug.apk outputs/JavidDownloader-v1.6.0-BETA-INSTALLABLE.apk
       - name: Upload APK build
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v1.5.3-build
+          name: JavidDownloader-v1.6.0-build
           path: JavidDownloader/outputs/*.apk
           if-no-files-found: error
       - name: Provide Android APK signer toolkit
