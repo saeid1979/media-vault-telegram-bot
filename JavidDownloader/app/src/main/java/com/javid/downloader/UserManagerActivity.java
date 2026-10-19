@@ -122,6 +122,11 @@ public final class UserManagerActivity extends Activity {
         box.addView(exportFile);
         exportFile.setOnClickListener(v -> pickExport());
         gap(box, 9);
+        Button dashboard = button("📊 داشبورد فعالیت بات", Color.rgb(234, 237, 252), NAVY);
+        box.addView(dashboard);
+        dashboard.setOnClickListener(v ->
+            startActivity(new Intent(this, DashboardActivity.class)));
+        gap(box, 9);
         Button broadcast = button("📢 ارسال اطلاعیه به اعضای فعال بات", Color.rgb(230, 238, 255), NAVY);
         box.addView(broadcast);
         broadcast.setOnClickListener(v ->
