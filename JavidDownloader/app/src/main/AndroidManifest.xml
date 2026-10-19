@@ -26,6 +26,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".UserManagerActivity" android:exported="false" />
+        <activity android:name=".BroadcastActivity" android:exported="false" />
         <service android:name=".TelegramBotService" android:exported="false"
             android:stopWithTask="false" android:foregroundServiceType="dataSync"/>
     </application>
