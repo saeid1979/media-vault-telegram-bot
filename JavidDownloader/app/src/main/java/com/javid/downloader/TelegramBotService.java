@@ -61,7 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 1.6.0 · VIP expiry + announcements";
+    private static final String BUILD_LABEL = "Javid Downloader Android 1.7.0 · analytics dashboard";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -190,6 +190,11 @@ public final class TelegramBotService extends Service {
     private volatile boolean running = false;
     private volatile HttpURLConnection pollConnection;
     private BotUserStore userStore;
+    private BotStatsStore botStats;
+    private void publishQueue() {
+        preferences().edit().putInt("current_downloads",
+            Math.max(0, outstandingDownloads.get())).apply();
+    }
     private boolean isOwner(long who) { return who == preferences().getLong("owner_id", 0L); }
     private boolean canDownload(long who) {
         return isOwner(who) || BotUserStore.allowed(userStore.find(who));
@@ -248,6 +253,7 @@ public final class TelegramBotService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         userStore = new BotUserStore(this);
+        botStats = new BotStatsStore(this);
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
             NotificationChannel chan = new NotificationChannel(CHANNEL, "ربات تلگرام جاوید",
@@ -264,6 +270,7 @@ public final class TelegramBotService extends Service {
         }
         if (running) return START_NOT_STICKY;
         running = true;
+        publishQueue();
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, notification("در حال اتصال به تلگرام..."),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
@@ -284,7 +291,7 @@ public final class TelegramBotService extends Service {
         running = false;
         HttpURLConnection c = pollConnection;
         if (c != null) c.disconnect();
-        preferences().edit().putBoolean("enabled", false).apply();
+        preferences().edit().putBoolean("enabled", false).putInt("current_downloads", 0).apply();
         status("ربات متوقف است");
         downloadExecutor.shutdownNow();
         progressExecutor.shutdownNow();
@@ -299,8 +306,11 @@ public final class TelegramBotService extends Service {
         if (c != null) c.disconnect();
         pollExecutor.shutdownNow();
         downloadExecutor.shutdownNow();
+        progressExecutor.shutdownNow();
+        if (botStats != null) botStats.close();
+        if (userStore != null) userStore.close();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
-        preferences().edit().putBoolean("enabled", false).apply();
+        preferences().edit().putBoolean("enabled", false).putInt("current_downloads", 0).apply();
         super.onDestroy();
     }
 
@@ -324,7 +334,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v1.6.0 · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v1.7.0 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -347,7 +357,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · v1.6.0 · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v1.7.0 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -464,8 +474,10 @@ public final class TelegramBotService extends Service {
                 return;
             }
             int queued = outstandingDownloads.incrementAndGet();
+            publishQueue();
             if (queued > 8) {
                 outstandingDownloads.decrementAndGet();
+                publishQueue();
                 userDownloads.remove(who);
                 editText(chat, promptId, "⏳ صف دانلود پر است. کمی بعد دوباره تلاش کن.", tok);
                 return;
@@ -489,6 +501,7 @@ public final class TelegramBotService extends Service {
                     finally {
                         userDownloads.remove(who);
                         outstandingDownloads.decrementAndGet();
+                        publishQueue();
                     }
                 });
             } catch (java.util.concurrent.RejectedExecutionException stopped) {
@@ -687,8 +700,10 @@ public final class TelegramBotService extends Service {
                 .putLong("last_upload_ms", uploadMs).apply();
             if (!isOwner(who)) userStore.recordDelivered(who);
             preferences().edit().putInt("delivered", preferences().getInt("delivered", 0) + 1).apply();
+            try { botStats.downloadDelivered(); } catch (Exception ignored) { }
             reporter.finish(true, "");
         } catch (Exception e) {
+            try { botStats.downloadFailed(); } catch (Exception ignored) { }
             String friendly = e instanceof IllegalStateException && e.getMessage() != null
                 ? e.getMessage()
                 : "دانلود یا ارسال ناموفق بود. لینک، شبکه و حجم فایل را بررسی کن.";
