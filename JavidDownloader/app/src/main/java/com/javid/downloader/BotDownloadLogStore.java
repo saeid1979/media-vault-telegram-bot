@@ -159,6 +159,12 @@ public final class BotDownloadLogStore extends SQLiteOpenHelper {
         }
         return result;
     }
+    /** Self-service deletion of one Telegram user's detailed 30-day activity. */
+    public synchronized int deleteForUser(long userId) {
+        if (userId <= 0) return 0;
+        return getWritableDatabase().delete("audit", "telegram_id=?",
+            new String[]{String.valueOf(userId)});
+    }
     public synchronized Summary summary() {
         Summary sum = new Summary();
         String after = String.valueOf(System.currentTimeMillis() - RETENTION_MS);
