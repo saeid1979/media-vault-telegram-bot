@@ -61,7 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 1.7.0 · analytics dashboard";
+    private static final String BUILD_LABEL = "Javid Downloader Android 1.7.1 · quality fallback fix";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -85,6 +85,7 @@ public final class TelegramBotService extends Service {
         volatile int percent = 0;
         volatile String stage = "download";
         volatile String lastSent = "";
+        volatile String notice = "";
         private ScheduledFuture<?> ticker;
         private volatile boolean ended = false;
         ProgressReporter(long chat, int messageId, String tok) {
@@ -105,7 +106,8 @@ public final class TelegramBotService extends Service {
             int blocks = Math.min(10, p / 10);
             StringBuilder bar = new StringBuilder();
             for (int i = 0; i < 10; i++) bar.append(i < blocks ? "■" : "□");
-            return label + ": " + p + "%\n" + bar;
+            return label + ": " + p + "%\n" + bar +
+                (notice.isEmpty() ? "" : "\n" + notice);
         }
         private void tick() {
             if (ended) return;
@@ -334,7 +336,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v1.7.0 · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v1.7.1 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -357,7 +359,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · v1.7.0 · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v1.7.1 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -451,6 +453,8 @@ public final class TelegramBotService extends Service {
                             .put(new JSONObject().put("text", "720p").put("callback_data", "quality:" + parts[1] + ":720"))
                             .put(new JSONObject().put("text", "480p").put("callback_data", "quality:" + parts[1] + ":480")),
                         new JSONArray()
+                            .put(new JSONObject().put("text", "360p").put("callback_data", "quality:" + parts[1] + ":360")),
+                        new JSONArray()
                             .put(new JSONObject().put("text", "🎵 MP3").put("callback_data", "fmt:" + parts[1] + ":a"))
                             .put(new JSONObject().put("text", "❌ لغو").put("callback_data", "cancel:" + parts[1]))
                     );
@@ -467,7 +471,7 @@ public final class TelegramBotService extends Service {
             else {
                 try { height = Integer.parseInt(parts[2]); }
                 catch (NumberFormatException e) { return; }
-                if (height != 1080 && height != 720 && height != 480) return;
+                if (height != 1080 && height != 720 && height != 480 && height != 360) return;
             }
             if (userDownloads.putIfAbsent(who, true) != null) {
                 editText(chat, promptId, "⏳ دانلود قبلی شما هنوز در حال انجام است.", tok);
@@ -569,6 +573,12 @@ public final class TelegramBotService extends Service {
             sendText(chat, "✅ بات روی گوشی Javid Downloader فعال است.\nنسخه موتور: " + BUILD_LABEL, tok);
             return;
         }
+        if ((text.equals("/diag") || text.startsWith("/diag@")) && isOwner(user)) {
+            sendText(chat, "🔎 آخرین خطای دانلود (بدون ثبت لینک یا مشخصات کاربران):\n" +
+                preferences().getString("last_download_issue", "هنوز خطایی ثبت نشده است.") +
+                "\nبرای دیدن علت جدید، یک دانلود آزمایشی انجام بده.", tok);
+            return;
+        }
         if (text.startsWith("/speed") && isOwner(user)) {
             SharedPreferences p = preferences();
             sendText(chat, "🧪 وضعیت عملکرد بات روی گوشی" +
@@ -628,9 +638,111 @@ public final class TelegramBotService extends Service {
         return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
     }
 
+    /** Optional bounded selection, followed by safe nearest-quality fallback. */
+    private YoutubeDLRequest mediaRequest(String link, File folder, boolean audio,
+                                          int height, boolean fallback) {
+        YoutubeDLRequest request = new YoutubeDLRequest(link);
+        request.addOption("--no-playlist");
+        request.addOption("--no-mtime");
+        request.addOption("--max-filesize", "45M");
+        request.addOption("--concurrent-fragments", "4");
+        request.addOption("--retries", "3");
+        request.addOption("--fragment-retries", "3");
+        request.addOption("--socket-timeout", "20");
+        request.addOption("-o", new File(folder,
+            "%(title).110B [%(id)s].%(ext)s").getAbsolutePath());
+        if (audio) {
+            request.addOption("-x");
+            request.addOption("--audio-format", "mp3");
+            request.addOption("--audio-quality", "5");
+        } else {
+            String bound = String.valueOf(height);
+            if (fallback) {
+                // Sorting by target resolution avoids failing on missing
+                // height metadata, but the actual source quality may differ.
+                request.addOption("-f", "b/bv*+ba");
+                request.addOption("-S", "res:" + bound + ",ext:mp4");
+            } else {
+                String formats = "b[height<=" + bound + "][ext=mp4]" +
+                    "/bv*[height<=" + bound + "][ext=mp4]+ba[ext=m4a]" +
+                    "/b[height<=" + bound + "]" +
+                    "/bv*[height<=" + bound + "]+ba";
+                request.addOption("-f", formats);
+            }
+            request.addOption("--merge-output-format", "mp4");
+        }
+        return request;
+    }
+
+    private static final class MediaFailure extends Exception {
+        final String details;
+        MediaFailure(Exception cause, String details) {
+            super(cause);
+            this.details = details == null ? "" : details;
+        }
+    }
+    private static String getErrorSummary(Throwable failure, String output) {
+        StringBuilder summary = new StringBuilder();
+        for (Throwable e = failure; e != null; e = e.getCause()) {
+            if (e.getMessage() != null) summary.append(' ').append(e.getMessage());
+        }
+        if (output != null) summary.append(' ').append(output);
+        String text = summary.toString().toLowerCase(java.util.Locale.ROOT);
+        return text.substring(Math.max(0, text.length() - 5000));
+    }
+    private static boolean isFormatUnavailable(String detail) {
+        return detail.contains("requested format is not available") ||
+            detail.contains("requested format not available") ||
+            (detail.contains("requested format") && detail.contains("not available"));
+    }
+    private static boolean isAccessFailure(String detail) {
+        return detail.contains("login required") || detail.contains("log in") ||
+            detail.contains("sign in") || detail.contains("private") ||
+            detail.contains("drm") || detail.contains("403") ||
+            detail.contains("429") || detail.contains("captcha") ||
+            detail.contains("not available in your country");
+    }
+    private String friendlyFailure(Throwable error, String details, boolean uploadPhase) {
+        if (error instanceof IllegalStateException && error.getMessage() != null)
+            return error.getMessage();
+        if (uploadPhase) {
+            if (details.contains("413")) return "تلگرام حجم این فایل را نمی‌پذیرد. کیفیت پایین‌تر را انتخاب کن.";
+            return "فایل دریافت شد، اما ارسال آن به تلگرام ناموفق بود. اتصال گوشی را بررسی کن.";
+        }
+        if (isFormatUnavailable(details))
+            return "این کیفیت در ویدیو موجود نیست؛ دریافت خودکار با فرمت دیگر هم موفق نشد.";
+        if (details.contains("429") || details.contains("too many requests"))
+            return "سایت موقتاً درخواست‌های زیاد را محدود کرده است. کمی بعد دوباره تلاش کن.";
+        if (details.contains("login") || details.contains("sign in") ||
+            details.contains("private") || details.contains("403") || details.contains("captcha"))
+            return "سایت به این ویدیو دسترسی عمومی نمی‌دهد یا ورود به حساب می‌خواهد.";
+        if (details.contains("unsupported url") || details.contains("not supported"))
+            return "این آدرس در موتور دانلود فعلی پشتیبانی نمی‌شود.";
+        if (details.contains("404") || details.contains("not found") ||
+            details.contains("unavailable"))
+            return "ویدیو در دسترس نیست یا لینک آن تغییر کرده است.";
+        if (details.contains("timed out") || details.contains("timeout") ||
+            details.contains("connection"))
+            return "اتصال سایت قطع شد یا پاسخ آن دیر رسید. اینترنت و لینک را بررسی کن.";
+        if (details.contains("file is larger") || details.contains("max-filesize"))
+            return "حجم فایل از سقف ۴۵ مگابایت بیشتر است؛ کیفیت پایین‌تر را انتخاب کن.";
+        return "دریافت از منبع ناموفق بود. عمومی بودن لینک و به‌روز بودن موتور دانلود را بررسی کن.";
+    }
+    private static String categoryCode(String details, boolean uploadPhase) {
+        if (uploadPhase) return "TELEGRAM_UPLOAD";
+        if (isFormatUnavailable(details)) return "FORMAT_UNAVAILABLE";
+        if (details.contains("429")) return "SOURCE_RATE_LIMIT";
+        if (isAccessFailure(details)) return "SOURCE_ACCESS";
+        if (details.contains("404")) return "SOURCE_NOT_FOUND";
+        if (details.contains("unsupported")) return "UNSUPPORTED_URL";
+        if (details.contains("timeout") || details.contains("connection")) return "NETWORK";
+        return "SOURCE_OTHER";
+    }
+
     private void downloadAndSend(long who, long chat, String link, boolean audio, int height,
                                  String tok, ProgressReporter reporter) {
         File folder = new File(getExternalFilesDir(null), "bot-work/" + UUID.randomUUID());
+        boolean uploadPhase = false;
         try {
             reporter.phase("download");
             reporter.percent(0);
@@ -641,41 +753,52 @@ public final class TelegramBotService extends Service {
             if (!folder.mkdirs()) throw new Exception("Cannot create temporary folder");
             ensureMediaReady();
             long startedDownload = SystemClock.elapsedRealtime();
-            YoutubeDLRequest request = new YoutubeDLRequest(link);
-            request.addOption("--no-playlist");
-            request.addOption("--no-mtime");
-            request.addOption("--max-filesize", "45M");
-            request.addOption("--concurrent-fragments", "4");
-            request.addOption("--retries", "3");
-            request.addOption("--fragment-retries", "3");
-            request.addOption("--socket-timeout", "20");
-            request.addOption("-o", new File(folder, "%(title).110B [%(id)s].%(ext)s").getAbsolutePath());
-            if (audio) {
-                request.addOption("-x");
-                request.addOption("--audio-format", "mp3");
-                request.addOption("--audio-quality", "5");
-            } else {
-                // Best video+audio up to the chosen ceiling; may use a lower source quality.
-                // YouTube often provides 1080p only as separate video/audio streams.
-                String maxHeight = String.valueOf(height);
-                String fmt = "bv*[height<=" + maxHeight + "][ext=mp4]+ba[ext=m4a]" +
-                    "/bv*[height<=" + maxHeight + "]+ba" +
-                    "/b[height<=" + maxHeight + "][ext=mp4]" +
-                    "/b[height<=" + maxHeight + "]";
-                request.addOption("-f", fmt);
-                request.addOption("--merge-output-format", "mp4");
-            }
+            YoutubeDLRequest request = mediaRequest(link, folder, audio, height, false);
+            final String[] latestError = {""};
             Function3<Float, Long, String, Unit> track = (p, eta, output) -> {
-                if (output != null && (output.contains("[ExtractAudio]") ||
-                    output.contains("[Merger]") || output.contains("[VideoConvertor]"))) {
-                    reporter.phase("processing");
+                if (output != null) {
+                    String lower = output.toLowerCase(java.util.Locale.ROOT);
+                    if (lower.contains("error:") || lower.contains("requested format") ||
+                        lower.contains("login") || lower.contains("no video formats") ||
+                        lower.contains("http error") || lower.contains("sign in")) {
+                        latestError[0] = output.length() > 3000 ?
+                            output.substring(output.length() - 3000) : output;
+                    }
+                    if (output.contains("[ExtractAudio]") || output.contains("[Merger]") ||
+                        output.contains("[VideoConvertor]")) {
+                        reporter.phase("processing");
+                    } else if (!"processing".equals(reporter.stage)) {
+                        reporter.phase("download");
+                        reporter.percent(p == null ? 0 : p);
+                    }
                 } else if (!"processing".equals(reporter.stage)) {
-                    reporter.phase("download");
                     reporter.percent(p == null ? 0 : p);
                 }
                 return Unit.INSTANCE;
             };
-            YoutubeDL.getInstance().execute(request, "telegram-" + UUID.randomUUID(), track);
+            try {
+                YoutubeDL.getInstance().execute(request, "telegram-" + UUID.randomUUID(), track);
+            } catch (Exception first) {
+                String reason = getErrorSummary(first, latestError[0]);
+                // Instagram and other hosts may omit 'height' in their format
+                // metadata. Only retry a genuinely missing-format case, not
+                // a private video, DRM, login failure or rate-limit response.
+                if (audio || !isFormatUnavailable(reason) || isAccessFailure(reason))
+                    throw new MediaFailure(first, reason);
+                reporter.phase("download");
+                reporter.percent(0);
+                reporter.notice = "فرمت دقیق موجود نبود؛ تلاش با کیفیت نزدیک‌تر.";
+                File[] partials = folder.listFiles();
+                if (partials != null) for (File partial : partials) deleteRecursive(partial);
+                latestError[0] = "";
+                YoutubeDLRequest fallback = mediaRequest(link, folder, false, height, true);
+                try {
+                    YoutubeDL.getInstance().execute(fallback,
+                        "telegram-fallback-" + UUID.randomUUID(), track);
+                } catch (Exception second) {
+                    throw new MediaFailure(second, getErrorSummary(second, latestError[0]));
+                }
+            }
             reporter.phase("processing");
             long downloadMs = SystemClock.elapsedRealtime() - startedDownload;
             File[] files = folder.listFiles((dir, name) -> {
@@ -692,6 +815,7 @@ public final class TelegramBotService extends Service {
             if (best.length() > MAX_UPLOAD)
                 throw new IllegalStateException("فایل بیش از ۴۵ مگابایت است. کیفیت پایین‌تر را امتحان کن.");
             reporter.phase("upload");
+            uploadPhase = true;
             reporter.percent(0);
             long uploadStart = SystemClock.elapsedRealtime();
             uploadDocument(chat, best, tok, reporter);
@@ -704,10 +828,13 @@ public final class TelegramBotService extends Service {
             reporter.finish(true, "");
         } catch (Exception e) {
             try { botStats.downloadFailed(); } catch (Exception ignored) { }
-            String friendly = e instanceof IllegalStateException && e.getMessage() != null
-                ? e.getMessage()
-                : "دانلود یا ارسال ناموفق بود. لینک، شبکه و حجم فایل را بررسی کن.";
-            reporter.finish(false, friendly);
+            String detail = e instanceof MediaFailure ? ((MediaFailure)e).details :
+                getErrorSummary(e, "");
+            String code = categoryCode(detail, uploadPhase);
+            preferences().edit().putString("last_download_issue",
+                code + " · " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
+                    java.util.Locale.US).format(new java.util.Date())).apply();
+            reporter.finish(false, friendlyFailure(e, detail, uploadPhase));
         } finally {
             deleteRecursive(folder);
         }
