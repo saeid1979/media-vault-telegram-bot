@@ -61,7 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 1.5.3 · three video qualities";
+    private static final String BUILD_LABEL = "Javid Downloader Android 1.6.0 · VIP expiry + announcements";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -324,7 +324,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v1.5.3 · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v1.6.0 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -347,7 +347,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · v1.5.3 · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v1.6.0 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -569,7 +569,11 @@ public final class TelegramBotService extends Service {
         if (text.startsWith("/profile") || text.startsWith("/limits")) {
             BotUserStore.User info = userStore.find(user);
             String profile = isOwner(user) ? "مالک · نامحدود" : info == null ? "ثبت نشده" :
-                "نقش: " + info.role + "\nدانلودهای ثبت‌شده: " + info.totalDownloads +
+                "نقش: " + BotUserStore.effectiveRole(info) +
+                (BotUserStore.vipExpired(info) ? " (VIP منقضی)" : "") +
+                ("vip".equals(info.role) ? "\nانقضای VIP: " +
+                    (info.vipExpiresOn.isEmpty() ? "بدون انقضا" : info.vipExpiresOn) : "") +
+                "\nدانلودهای ثبت‌شده: " + info.totalDownloads +
                 "\nسهمیه روزانه: " + BotUserStore.quota(info) +
                 "\nمصرف امروز: " + (new java.text.SimpleDateFormat("yyyy-MM-dd",
                     java.util.Locale.US).format(new java.util.Date()).equals(info.counterDay)
