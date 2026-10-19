@@ -121,6 +121,11 @@ public final class UserManagerActivity extends Activity {
         Button exportFile = button("⬇  پشتیبان‌گیری از کاربران", Color.rgb(233, 246, 241), NAVY);
         box.addView(exportFile);
         exportFile.setOnClickListener(v -> pickExport());
+        gap(box, 9);
+        Button broadcast = button("📢 ارسال اطلاعیه به اعضای فعال بات", Color.rgb(230, 238, 255), NAVY);
+        box.addView(broadcast);
+        broadcast.setOnClickListener(v ->
+            startActivity(new Intent(this, BroadcastActivity.class)));
         gap(box, 13);
         TextView note = label(
             "انتقال خودکار از APK قدیمی ممکن نیست؛ برنامه‌ها به پایگاه داده خصوصی یکدیگر دسترسی ندارند. " +
@@ -142,11 +147,11 @@ public final class UserManagerActivity extends Activity {
         List<BotUserStore.User> users = store.all();
         int vip = 0, active = 0;
         for (BotUserStore.User u : users) {
-            if ("vip".equals(u.role)) vip++;
+            if ("vip".equals(BotUserStore.effectiveRole(u))) vip++;
             if (u.active && !u.blocked) active++;
         }
         summary.setText("کاربران ثبت‌شده: " + users.size() + "  |  VIP: " + vip +
-            "\nکاربران فعال: " + active + "  |  هدف فعلی: بررسی ۹ کاربر و ۲ VIP");
+            "\nکاربران فعال: " + active + "  |  شمارش VIP با درنظرگرفتن انقضا");
         listContainer.removeAllViews();
         if (users.isEmpty()) {
             listContainer.addView(label("هنوز کاربری وارد نشده. برای شروع، Telegram ID اولین عضو را ثبت کن.", 13, false));
@@ -157,14 +162,18 @@ public final class UserManagerActivity extends Activity {
             card.setPadding(dp(14), dp(14), dp(14), dp(14));
             card.setBackground(bg(Color.WHITE, 16));
             TextView head = label((u.username.isEmpty() ? "کاربر " + u.id : u.username) +
-                "  ·  " + u.role.toUpperCase(Locale.ROOT), 15, true);
+                "  ·  " + BotUserStore.effectiveRole(u).toUpperCase(Locale.ROOT) +
+                (BotUserStore.vipExpired(u) ? " (VIP منقضی)" : ""), 15, true);
             card.addView(head);
             gap(card, 6);
             TextView info = label("Telegram ID: " + u.id +
                 "\n" + (u.blocked ? "مسدود" : u.active ? "فعال" : "در انتظار تأیید") +
                 " · سهمیه روزانه: " + (u.dailyLimit == null ? "پیش‌فرض " : "") +
                 BotUserStore.quota(u) +
-                "\nدانلودهای ثبت‌شده: " + u.totalDownloads, 12, false);
+                "\nدانلودهای ثبت‌شده: " + u.totalDownloads +
+                ("vip".equals(u.role) ? "\nاعتبار VIP: " +
+                    (u.vipExpiresOn == null || u.vipExpiresOn.isEmpty() ?
+                     "بدون انقضا" : u.vipExpiresOn) : ""), 12, false);
             card.addView(info);
             gap(card, 9);
             Button edit = button("ویرایش نقش، سهمیه و دسترسی", Color.rgb(234, 240, 252), NAVY);
@@ -201,6 +210,18 @@ public final class UserManagerActivity extends Activity {
         roles.setSelection(original == null ? 0 : "vip".equals(original.role) ? 1 :
             "admin".equals(original.role) ? 2 : 0);
         form.addView(roles);
+        EditText expiry = field(form, "تاریخ انقضای VIP: YYYY-MM-DD (خالی = دائمی)",
+            original == null ? "" : original.vipExpiresOn, false);
+        Button chooseDate = button("📅 انتخاب تاریخ پایان VIP", Color.rgb(229, 237, 252), NAVY);
+        form.addView(chooseDate);
+        chooseDate.setOnClickListener(v -> {
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            new android.app.DatePickerDialog(this, (view, y, month, day) ->
+                expiry.setText(String.format(java.util.Locale.US, "%04d-%02d-%02d",
+                    y, month + 1, day)),
+                cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH),
+                cal.get(java.util.Calendar.DAY_OF_MONTH)).show();
+        });
         EditText limit = field(form, "سهمیه روزانه (خالی = پیش‌فرض نقش)",
             original == null || original.dailyLimit == null ? "" :
                 String.valueOf(original.dailyLimit), true);
@@ -214,8 +235,10 @@ public final class UserManagerActivity extends Activity {
         blocked.setText("کاربر مسدود باشد");
         blocked.setChecked(original != null && original.blocked);
         form.addView(blocked);
+        ScrollView formScroll = new ScrollView(this);
+        formScroll.addView(form);
         new AlertDialog.Builder(this).setTitle(original == null ? "افزودن کاربر" : "ویرایش کاربر")
-            .setView(form).setNegativeButton("لغو", null)
+            .setView(formScroll).setNegativeButton("لغو", null)
             .setPositiveButton("ذخیره", (dialog, which) -> {
                 try {
                     BotUserStore.User user = original == null ? new BotUserStore.User() : original;
@@ -225,6 +248,9 @@ public final class UserManagerActivity extends Activity {
                     user.username = username.getText().toString().trim();
                     user.role = roles.getSelectedItemPosition() == 1 ? "vip" :
                         roles.getSelectedItemPosition() == 2 ? "admin" : "normal";
+                    user.vipExpiresOn = expiry.getText().toString().trim();
+                    if (!BotUserStore.validExpiry(user.vipExpiresOn))
+                        throw new IllegalArgumentException("تاریخ نامعتبر است");
                     String q = limit.getText().toString().trim();
                     user.dailyLimit = q.isEmpty() ? null : Integer.parseInt(q);
                     String c = history.getText().toString().trim();
@@ -237,7 +263,7 @@ public final class UserManagerActivity extends Activity {
                     store.save(user);
                     refresh();
                     notifyUser("اطلاعات کاربر ذخیره شد");
-                } catch (Exception e) { notifyUser("شناسه، سهمیه یا تعداد دانلود معتبر نیست"); }
+                } catch (Exception e) { notifyUser("شناسه، تاریخ VIP، سهمیه یا تعداد دانلود معتبر نیست"); }
             }).show();
     }
 
