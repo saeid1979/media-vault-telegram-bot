@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v1.6", LAVENDER, INK));
+        header.addView(badge("v1.7", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -387,6 +387,10 @@ public class MainActivity extends Activity {
         botCard.addView(manageUsers, new LinearLayout.LayoutParams(-1, dp(55)));
         manageUsers.setOnClickListener(v -> startActivity(new Intent(this, UserManagerActivity.class)));
         botCard.addView(gap(9));
+        Button dashboard = styledButton("📊  داشبورد مدیریتی و آمار هفتگی", Color.rgb(235, 237, 255), INK, 14, 13);
+        botCard.addView(dashboard, new LinearLayout.LayoutParams(-1, dp(55)));
+        dashboard.setOnClickListener(v -> startActivity(new Intent(this, DashboardActivity.class)));
+        botCard.addView(gap(9));
         Button sendAnnouncement = styledButton("📢  ارسال اطلاعیه به اعضای بات", Color.rgb(231, 246, 240), INK, 14, 13);
         botCard.addView(sendAnnouncement, new LinearLayout.LayoutParams(-1, dp(55)));
         sendAnnouncement.setOnClickListener(v -> startActivity(new Intent(this, BroadcastActivity.class)));
@@ -427,7 +431,7 @@ public class MainActivity extends Activity {
         settings.addView(label("پلتفرم‌های پشتیبانی‌شده", 15, INK, true));
         settings.addView(label("YouTube · Instagram · Facebook · TikTok · X\nPinterest · Vimeo · Reddit · Dailymotion · Twitch", 12, MUTED, false));
         settings.addView(gap(16));
-        settings.addView(label("Javid Downloader 1.6.0", 13, INK, true));
+        settings.addView(label("Javid Downloader 1.7.0", 13, INK, true));
         settings.addView(label("بدون حساب کاربری و بدون سرور اختصاصی", 12, MUTED, false));
         morePanel.addView(settings);
         content.addView(morePanel);
