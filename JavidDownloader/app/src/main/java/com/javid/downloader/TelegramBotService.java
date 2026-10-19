@@ -743,6 +743,7 @@ public final class TelegramBotService extends Service {
                                  String tok, ProgressReporter reporter) {
         File folder = new File(getExternalFilesDir(null), "bot-work/" + UUID.randomUUID());
         boolean uploadPhase = false;
+        final String[] lastExtractorIssue = {""};
         try {
             reporter.phase("download");
             reporter.percent(0);
@@ -754,7 +755,7 @@ public final class TelegramBotService extends Service {
             ensureMediaReady();
             long startedDownload = SystemClock.elapsedRealtime();
             YoutubeDLRequest request = mediaRequest(link, folder, audio, height, false);
-            final String[] latestError = {""};
+            final String[] latestError = lastExtractorIssue;
             Function3<Float, Long, String, Unit> track = (p, eta, output) -> {
                 if (output != null) {
                     String lower = output.toLowerCase(java.util.Locale.ROOT);
@@ -829,7 +830,7 @@ public final class TelegramBotService extends Service {
         } catch (Exception e) {
             try { botStats.downloadFailed(); } catch (Exception ignored) { }
             String detail = e instanceof MediaFailure ? ((MediaFailure)e).details :
-                getErrorSummary(e, "");
+                getErrorSummary(e, lastExtractorIssue[0]);
             String code = categoryCode(detail, uploadPhase);
             preferences().edit().putString("last_download_issue",
                 code + " · " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
