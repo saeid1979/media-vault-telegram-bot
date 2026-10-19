@@ -15,7 +15,7 @@ import java.util.Locale;
 /** Private device database. Accounts start inactive until approved by the owner. */
 public final class BotUserStore extends SQLiteOpenHelper {
     private static final String NAME = "javid_bot_users_v1.db";
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     public BotUserStore(Context context) { super(context, NAME, null, VERSION); }
 
     public static final class User {
@@ -29,6 +29,7 @@ public final class BotUserStore extends SQLiteOpenHelper {
         public int todayDownloads;
         public String counterDay = "";
         public String source = "manual";
+        public String vipExpiresOn = ""; // YYYY-MM-DD, empty = no expiry
     }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE bot_users (" +
@@ -37,9 +38,15 @@ public final class BotUserStore extends SQLiteOpenHelper {
             "blocked INTEGER NOT NULL DEFAULT 0,daily_limit INTEGER," +
             "total_downloads INTEGER NOT NULL DEFAULT 0," +
             "today_downloads INTEGER NOT NULL DEFAULT 0,counter_day TEXT NOT NULL DEFAULT ''," +
-            "source TEXT NOT NULL DEFAULT 'manual',updated_at INTEGER NOT NULL DEFAULT 0)");
+            "source TEXT NOT NULL DEFAULT 'manual',updated_at INTEGER NOT NULL DEFAULT 0," +
+            "vip_expires_on TEXT NOT NULL DEFAULT '')");
     }
-    @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) { }
+    @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        // Non-destructive schema upgrade: preserve the existing 18 imported users,
+        // their roles, quotas and counters. Existing VIP accounts remain indefinite.
+        if (oldVersion < 2) db.execSQL(
+            "ALTER TABLE bot_users ADD COLUMN vip_expires_on TEXT NOT NULL DEFAULT ''");
+    }
 
     private static String today() {
         return new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new java.util.Date());
@@ -52,10 +59,11 @@ public final class BotUserStore extends SQLiteOpenHelper {
         u.totalDownloads = c.getInt(6);
         u.todayDownloads = c.getInt(7);
         u.counterDay = c.getString(8); u.source = c.getString(9);
+        u.vipExpiresOn = c.getString(10);
         return u;
     }
     private static final String SELECT = "SELECT user_id,username,role,active,blocked,daily_limit," +
-        "total_downloads,today_downloads,counter_day,source FROM bot_users";
+        "total_downloads,today_downloads,counter_day,source,vip_expires_on FROM bot_users";
 
     public synchronized User find(long id) {
         try (Cursor c = getReadableDatabase().rawQuery(SELECT + " WHERE user_id=?",
@@ -73,10 +81,26 @@ public final class BotUserStore extends SQLiteOpenHelper {
         save(user);
         return user;
     }
+    public static boolean validExpiry(String text) {
+        if (text == null || text.trim().isEmpty()) return true;
+        try {
+            java.time.LocalDate date = java.time.LocalDate.parse(text);
+            return date.getYear() >= 2020 && date.getYear() <= 2100;
+        } catch (Exception invalid) { return false; }
+    }
+    public static boolean vipExpired(User u) {
+        return u != null && "vip".equals(u.role) && u.vipExpiresOn != null &&
+            !u.vipExpiresOn.isEmpty() && today().compareTo(u.vipExpiresOn) > 0;
+    }
+    public static String effectiveRole(User u) {
+        return vipExpired(u) ? "normal" : u.role;
+    }
     public static int quota(User u) {
+        // Expired VIP accounts fall back to the normal daily quota. An explicitly
+        // configured daily limit remains in effect until the owner changes it.
         if (u.dailyLimit != null) return Math.max(0, u.dailyLimit);
-        if ("admin".equals(u.role)) return Integer.MAX_VALUE;
-        return "vip".equals(u.role) ? 50 : 10;
+        if ("admin".equals(effectiveRole(u))) return Integer.MAX_VALUE;
+        return "vip".equals(effectiveRole(u)) ? 50 : 10;
     }
     public static boolean allowed(User u) {
         return u != null && u.active && !u.blocked &&
@@ -94,11 +118,13 @@ public final class BotUserStore extends SQLiteOpenHelper {
         v.put("today_downloads", Math.max(0, u.todayDownloads));
         v.put("counter_day", u.counterDay == null ? "" : u.counterDay);
         v.put("source", u.source == null ? "manual" : u.source);
+        v.put("vip_expires_on", u.vipExpiresOn == null ? "" : u.vipExpiresOn);
         v.put("updated_at", System.currentTimeMillis());
         db.insertWithOnConflict("bot_users", null, v, SQLiteDatabase.CONFLICT_REPLACE);
     }
     public synchronized void save(User u) {
         if (u.id <= 0) throw new IllegalArgumentException("Invalid Telegram user id");
+        if (!validExpiry(u.vipExpiresOn)) throw new IllegalArgumentException("Invalid VIP date");
         put(getWritableDatabase(), u);
     }
     public synchronized int count() {
@@ -108,7 +134,8 @@ public final class BotUserStore extends SQLiteOpenHelper {
     }
     public synchronized int countVip() {
         try (Cursor c = getReadableDatabase().rawQuery(
-                "SELECT COUNT(*) FROM bot_users WHERE role='vip'", null)) {
+                "SELECT COUNT(*) FROM bot_users WHERE role='vip' AND " +
+            "(vip_expires_on='' OR vip_expires_on>=date('now','localtime'))", null)) {
             return c.moveToFirst() ? c.getInt(0) : 0;
         }
     }
@@ -139,6 +166,7 @@ public final class BotUserStore extends SQLiteOpenHelper {
         row.put("downloads_count", u.totalDownloads);
         row.put("today_count", u.todayDownloads);
         row.put("counter_day", u.counterDay);
+        row.put("vip_expires_on", u.vipExpiresOn);
         return row;
     }
     public synchronized byte[] exportJson() throws Exception {
@@ -171,6 +199,9 @@ public final class BotUserStore extends SQLiteOpenHelper {
         u.totalDownloads = count;
         u.todayDownloads = Math.max(0, row.optInt("today_count", 0));
         u.counterDay = row.optString("counter_day", "");
+        u.vipExpiresOn = row.optString("vip_expires_on", "");
+        if (!validExpiry(u.vipExpiresOn))
+            throw new IllegalArgumentException("Invalid VIP expiry");
         u.source = "import";
         return u;
     }
