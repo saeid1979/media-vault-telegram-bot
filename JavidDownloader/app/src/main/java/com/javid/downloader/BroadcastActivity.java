@@ -238,6 +238,7 @@ public final class BroadcastActivity extends Activity {
         messageInput.setEnabled(false);
         worker.execute(() -> {
             int ok = 0, fail = 0;
+            BotStatsStore audit = new BotStatsStore(this);
             String error = "";
             String bot = "";
             try {
@@ -245,6 +246,7 @@ public final class BroadcastActivity extends Activity {
                 if (tok == null || tok.isEmpty()) throw new IllegalStateException("توکن بات ذخیره نشده است.");
                 JSONObject me = request("getMe", new JSONObject(), tok);
                 bot = me.getJSONObject("result").optString("username", "UnknownBot");
+                try { audit.announcementStarted(); } catch (Exception ignored) { }
                 show("در حال ارسال از @" + bot + " ...");
                 for (int index = 0; index < selected.size() && !cancelRequested; index++) {
                     BotUserStore.User user = selected.get(index);
@@ -255,8 +257,10 @@ public final class BroadcastActivity extends Activity {
                                 .put("text", message)
                                 .put("disable_notification", true), tok);
                         ok++;
+                        try { audit.messageDelivered(); } catch (Exception ignored) { }
                     } catch (Exception e) {
                         fail++;
+                        try { audit.messageFailed(); } catch (Exception ignored) { }
                         error = "برخی کاربران بات را شروع نکرده یا مسدود کرده‌اند.";
                     }
                     final int done = index + 1, succeeded = ok, failed = fail;
@@ -271,6 +275,7 @@ public final class BroadcastActivity extends Activity {
             } catch (Exception exception) {
                 error = "ارسال برقرار نشد. هویت بات و اتصال اینترنت را بررسی کن.";
             }
+            audit.close();
             final int succeeded = ok, failed = fail;
             final String summary = error, username = bot;
             ui.post(() -> {
