@@ -61,7 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 1.7.1 · quality fallback fix";
+    private static final String BUILD_LABEL = "Javid Downloader Android 1.8.0 · download history and source audit";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -193,6 +193,7 @@ public final class TelegramBotService extends Service {
     private volatile HttpURLConnection pollConnection;
     private BotUserStore userStore;
     private BotStatsStore botStats;
+    private BotDownloadLogStore audit;
     private void publishQueue() {
         preferences().edit().putInt("current_downloads",
             Math.max(0, outstandingDownloads.get())).apply();
@@ -256,6 +257,7 @@ public final class TelegramBotService extends Service {
         super.onCreate();
         userStore = new BotUserStore(this);
         botStats = new BotStatsStore(this);
+        audit = new BotDownloadLogStore(this);
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
             NotificationChannel chan = new NotificationChannel(CHANNEL, "ربات تلگرام جاوید",
@@ -336,7 +338,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v1.7.1 · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v1.8.0 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -359,7 +361,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · v1.7.1 · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v1.8.0 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -491,6 +493,12 @@ public final class TelegramBotService extends Service {
                 userDownloads.remove(who);
                 return;
             }
+            String userLabel = from.optString("username", "");
+            if (!userLabel.isEmpty()) userLabel = "@" + userLabel;
+            else userLabel = from.optString("first_name", "") + " " +
+                from.optString("last_name", "");
+            if (userLabel.trim().isEmpty() && isOwner(who)) userLabel = "مالک بات";
+            final String senderLabel = userLabel.trim();
             ProgressReporter reporter = new ProgressReporter(chat, promptId, tok);
             reporter.phase(queued > 2 ? "waiting" : "download");
             // Immediately remove old inline buttons; subsequent edits update this SAME message.
@@ -501,7 +509,7 @@ public final class TelegramBotService extends Service {
             reporter.start();
             try {
                 downloadExecutor.execute(() -> {
-                    try { downloadAndSend(who, chat, item.url, audio, height, tok, reporter); }
+                    try { downloadAndSend(who, senderLabel, chat, item.url, audio, height, tok, reporter); }
                     finally {
                         userDownloads.remove(who);
                         outstandingDownloads.decrementAndGet();
@@ -739,10 +747,15 @@ public final class TelegramBotService extends Service {
         return "SOURCE_OTHER";
     }
 
-    private void downloadAndSend(long who, long chat, String link, boolean audio, int height,
-                                 String tok, ProgressReporter reporter) {
+    private void downloadAndSend(long who, String senderLabel, long chat, String link,
+                                 boolean audio, int height, String tok, ProgressReporter reporter) {
         File folder = new File(getExternalFilesDir(null), "bot-work/" + UUID.randomUUID());
+        long startedAt = SystemClock.elapsedRealtime();
         boolean uploadPhase = false;
+        boolean delivered = false;
+        String itemTitle = "";
+        String issueCategory = "";
+        long itemSize = 0;
         final String[] lastExtractorIssue = {""};
         try {
             reporter.phase("download");
@@ -813,6 +826,8 @@ public final class TelegramBotService extends Service {
                     best = candidate;
             }
             if (best == null || best.length() == 0) throw new Exception("No output media");
+            itemTitle = BotDownloadLogStore.titleFromFilename(best.getName());
+            itemSize = best.length();
             if (best.length() > MAX_UPLOAD)
                 throw new IllegalStateException("فایل بیش از ۴۵ مگابایت است. کیفیت پایین‌تر را امتحان کن.");
             reporter.phase("upload");
@@ -820,23 +835,45 @@ public final class TelegramBotService extends Service {
             reporter.percent(0);
             long uploadStart = SystemClock.elapsedRealtime();
             uploadDocument(chat, best, tok, reporter);
+            delivered = true;
             long uploadMs = SystemClock.elapsedRealtime() - uploadStart;
             preferences().edit().putLong("last_download_ms", downloadMs)
                 .putLong("last_upload_ms", uploadMs).apply();
-            if (!isOwner(who)) userStore.recordDelivered(who);
+            try { if (!isOwner(who)) userStore.recordDelivered(who); }
+            catch (Exception ignored) { /* delivered file remains a success */ }
             preferences().edit().putInt("delivered", preferences().getInt("delivered", 0) + 1).apply();
             try { botStats.downloadDelivered(); } catch (Exception ignored) { }
             reporter.finish(true, "");
         } catch (Exception e) {
-            try { botStats.downloadFailed(); } catch (Exception ignored) { }
-            String detail = e instanceof MediaFailure ? ((MediaFailure)e).details :
-                getErrorSummary(e, lastExtractorIssue[0]);
-            String code = categoryCode(detail, uploadPhase);
-            preferences().edit().putString("last_download_issue",
-                code + " · " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
-                    java.util.Locale.US).format(new java.util.Date())).apply();
-            reporter.finish(false, friendlyFailure(e, detail, uploadPhase));
+            if (!delivered) {
+                try { botStats.downloadFailed(); } catch (Exception ignored) { }
+                String detail = e instanceof MediaFailure ? ((MediaFailure)e).details :
+                    getErrorSummary(e, lastExtractorIssue[0]);
+                issueCategory = categoryCode(detail, uploadPhase);
+                preferences().edit().putString("last_download_issue",
+                    issueCategory + " · " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",
+                        java.util.Locale.US).format(new java.util.Date())).apply();
+                reporter.finish(false, friendlyFailure(e, detail, uploadPhase));
+            } else {
+                reporter.finish(true, "");
+            }
         } finally {
+            // Metadata is retained for 30 days at most. No private query
+            // params, Telegram message bodies or raw error text are logged.
+            try {
+                BotDownloadLogStore.Entry entry = new BotDownloadLogStore.Entry();
+                entry.userId = who;
+                entry.userLabel = senderLabel;
+                entry.platform = allowedHost(link);
+                entry.title = itemTitle;
+                entry.publicUrl = link;
+                entry.requestedFormat = audio ? "MP3" : height + "p";
+                entry.status = delivered ? "success" : "failed";
+                entry.issue = delivered ? "" : issueCategory;
+                entry.fileBytes = delivered ? itemSize : 0;
+                entry.durationMs = SystemClock.elapsedRealtime() - startedAt;
+                audit.record(entry);
+            } catch (Exception ignored) { }
             deleteRecursive(folder);
         }
     }
