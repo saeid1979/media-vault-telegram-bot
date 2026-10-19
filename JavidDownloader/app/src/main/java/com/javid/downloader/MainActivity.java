@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v1.5.3", LAVENDER, INK));
+        header.addView(badge("v1.6", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -386,6 +386,10 @@ public class MainActivity extends Activity {
         Button manageUsers = styledButton("👥  مدیریت و انتقال کاربران", Color.rgb(221, 235, 252), INK, 14, 13);
         botCard.addView(manageUsers, new LinearLayout.LayoutParams(-1, dp(55)));
         manageUsers.setOnClickListener(v -> startActivity(new Intent(this, UserManagerActivity.class)));
+        botCard.addView(gap(9));
+        Button sendAnnouncement = styledButton("📢  ارسال اطلاعیه به اعضای بات", Color.rgb(231, 246, 240), INK, 14, 13);
+        botCard.addView(sendAnnouncement, new LinearLayout.LayoutParams(-1, dp(55)));
+        sendAnnouncement.setOnClickListener(v -> startActivity(new Intent(this, BroadcastActivity.class)));
         botCard.addView(gap(13));
         botCard.addView(label("کاربران ثبت‌شده و تأییدشده اکنون می‌توانند از بات استفاده کنند. انتقال داده‌های برنامه قدیمی نیاز به ورود اطلاعات یا فایل پشتیبان سازگار دارد.",
             12, MUTED, false));
@@ -423,7 +427,7 @@ public class MainActivity extends Activity {
         settings.addView(label("پلتفرم‌های پشتیبانی‌شده", 15, INK, true));
         settings.addView(label("YouTube · Instagram · Facebook · TikTok · X\nPinterest · Vimeo · Reddit · Dailymotion · Twitch", 12, MUTED, false));
         settings.addView(gap(16));
-        settings.addView(label("Javid Downloader 1.5.3", 13, INK, true));
+        settings.addView(label("Javid Downloader 1.6.0", 13, INK, true));
         settings.addView(label("بدون حساب کاربری و بدون سرور اختصاصی", 12, MUTED, false));
         morePanel.addView(settings);
         content.addView(morePanel);
