@@ -74,6 +74,7 @@ public final class DashboardActivity extends Activity {
         long lastDownloadMs, lastUploadMs;
         BotStatsStore.Day totals;
         List<BotStatsStore.Day> sevenDays;
+        BotDownloadLogStore.Summary downloadAudit;
     }
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -111,7 +112,8 @@ public final class DashboardActivity extends Activity {
         body.addView(text("در حال خواندن آمار…", 14, MUTED, false));
         worker.execute(() -> {
             try (BotUserStore userStore = new BotUserStore(this);
-                 BotStatsStore stats = new BotStatsStore(this)) {
+                 BotStatsStore stats = new BotStatsStore(this);
+                 BotDownloadLogStore audit = new BotDownloadLogStore(this)) {
                 Snapshot data = new Snapshot();
                 List<BotUserStore.User> all = userStore.all();
                 data.users = all.size();
@@ -125,6 +127,7 @@ public final class DashboardActivity extends Activity {
                 }
                 data.totals = stats.totals();
                 data.sevenDays = stats.lastDays(7);
+                data.downloadAudit = audit.summary();
                 SharedPreferences prefs = getSharedPreferences(TelegramBotService.PREFS,
                     Context.MODE_PRIVATE);
                 data.queued = prefs.getInt("current_downloads", 0);
@@ -154,7 +157,7 @@ public final class DashboardActivity extends Activity {
         body.removeAllViews();
         body.addView(text("📊 داشبورد مدیریت Downloaderjavid", 22, INK, true));
         gap(body, 8);
-        body.addView(text("اطلاعات محلی گوشی | نسخه 1.7.0", 12, MUTED, false));
+        body.addView(text("اطلاعات محلی گوشی | نسخه 1.8.0", 12, MUTED, false));
         gap(body, 14);
         Button refresh = new Button(this);
         refresh.setText("↻ به‌روزرسانی آمار");
@@ -178,6 +181,36 @@ public final class DashboardActivity extends Activity {
         metric(body, "⚙️ دانلود در حال انجام یا انتظار", String.valueOf(data.queued),
             "آمار زنده فقط وقتی سرویس بات فعال است.", BLUE);
 
+        gap(body, 18);
+        body.addView(text("📋 کاربران چه چیزی دانلود کرده‌اند؟", 19, INK, true));
+        gap(body, 8);
+        metric(body, "درخواست‌های ۳۰ روز اخیر", String.valueOf(data.downloadAudit.total),
+            "موفق: " + data.downloadAudit.successful +
+            " | ناموفق: " + data.downloadAudit.failed, BLUE);
+        gap(body, 9);
+        Button openHistory = new Button(this);
+        openHistory.setText("👤 مشاهده کاربران، ویدیوها، منابع و زمان دانلود");
+        openHistory.setAllCaps(false);
+        openHistory.setTextColor(Color.WHITE);
+        openHistory.setBackground(background(BLUE, 12));
+        body.addView(openHistory, new LinearLayout.LayoutParams(-1, dp(58)));
+        openHistory.setOnClickListener(v ->
+            startActivity(new android.content.Intent(this, DownloadLogActivity.class)));
+        gap(body, 9);
+        if (data.downloadAudit.byPlatform.isEmpty()) {
+            body.addView(text("هنوز تاریخچه جزئی ثبت نشده؛ از اولین دانلود این نسخه شروع می‌شود.",
+                13, MUTED, false));
+        } else {
+            StringBuilder origins = new StringBuilder("منابع پربازدید: ");
+            java.util.List<java.util.Map.Entry<String,Integer>> sites =
+                new java.util.ArrayList<>(data.downloadAudit.byPlatform.entrySet());
+            sites.sort((a,b) -> Integer.compare(b.getValue(), a.getValue()));
+            for (int i=0; i<Math.min(4,sites.size()); i++) {
+                if (i>0) origins.append("  |  ");
+                origins.append(sites.get(i).getKey()).append(": ").append(sites.get(i).getValue());
+            }
+            body.addView(text(origins.toString(), 13, MUTED, false));
+        }
         gap(body, 19);
         body.addView(text("عملکرد بات از زمان نصب نسخه 1.7.0", 19, INK, true));
         gap(body, 9);
@@ -221,8 +254,9 @@ public final class DashboardActivity extends Activity {
             13, MUTED, false));
         gap(body, 16);
         body.addView(text(
-            "🔒 آمار این صفحه فقط روی گوشی ذخیره می‌شود. تعداد دانلودهای نسخه‌های قبلی از " +
-            "فهرست کاربران نمایش داده می‌شود؛ آمار موفق/ناموفق و نمودار جدید از نسخه 1.7.0 آغاز می‌شود.",
+            "🔒 گزارش هر دانلود فقط در این گوشی، تا ۳۰ روز ذخیره می‌شود. " +
+            "جزئیات دانلودهای قبل از نسخه 1.8.0 قابل بازیابی نیست؛ " +
+            "آمار موفق/ناموفق و نمودار کلی از نسخه 1.7.0 شروع شده است.",
             12, MUTED, false));
     }
 
