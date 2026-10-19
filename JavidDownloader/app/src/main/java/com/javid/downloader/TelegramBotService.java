@@ -556,11 +556,11 @@ public final class TelegramBotService extends Service {
         }
         if (text.equals("/privacy") || text.startsWith("/privacy@")) {
             sendText(chat, "🔒 شفافیت گزارش دانلود Downloaderjavid" +
-                "\\nبرای مدیریت بات، شناسه و نام نمایشی تلگرام، عنوان فایل، " +
+                "\nبرای مدیریت بات، شناسه و نام نمایشی تلگرام، عنوان فایل، " +
                 "سایت مبدأ، کیفیت درخواستی، تاریخ، حجم و نتیجه دانلود " +
                 "حداکثر ۳۰ روز در گوشی مدیر ثبت می‌شود." +
-                "\\nمتن پیام‌ها، رمزها و پارامترهای خصوصی لینک ذخیره نمی‌شوند." +
-                "\\nمی‌توانی با /forgetmyhistory تاریخچه جزئی خود را پاک کنی. " +
+                "\nمتن پیام‌ها، رمزها و پارامترهای خصوصی لینک ذخیره نمی‌شوند." +
+                "\nمی‌توانی با /forgetmyhistory تاریخچه جزئی خود را پاک کنی. " +
                 "شمارش‌های کلی و اطلاعات حساب عضو باقی می‌مانند.", tok);
             return;
         }
@@ -591,8 +591,8 @@ public final class TelegramBotService extends Service {
         }
         if (text.startsWith("/start") || text.startsWith("/help")) {
             sendText(chat, "سلام 👋\nلینک ویدیوی عمومی و مجاز را بفرست، حق دانلود را تأیید کن و ویدیو یا MP3 را انتخاب کن.\n"
-                    + "/status: وضعیت بات\\n/profile: حساب و سهمیه" +
-                    "\\n/privacy: نحوه ثبت تاریخچه\\n/forgetmyhistory: حذف گزارش جزئی خود", tok);
+                    + "/status: وضعیت بات\n/profile: حساب و سهمیه" +
+                    "\n/privacy: نحوه ثبت تاریخچه\n/forgetmyhistory: حذف گزارش جزئی خود", tok);
             return;
         }
         if (text.startsWith("/status")) {
