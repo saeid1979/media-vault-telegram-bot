@@ -61,7 +61,7 @@ public final class TelegramBotService extends Service {
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 1.9.0 · hourly world updates";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.0.0 · live football Europe/Iran + rain alerts; no news";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -199,6 +199,8 @@ public final class TelegramBotService extends Service {
     private BotStatsStore botStats;
     private BotDownloadLogStore audit;
     private HourlyDigestPublisher digests;
+    private FootballLiveTracker football;
+    private RainAlerts rainAlerts;
     private void publishQueue() {
         preferences().edit().putInt("current_downloads",
             Math.max(0, outstandingDownloads.get())).apply();
@@ -264,6 +266,8 @@ public final class TelegramBotService extends Service {
         botStats = new BotStatsStore(this);
         audit = new BotDownloadLogStore(this);
         digests = new HourlyDigestPublisher(this, preferences(), userStore);
+        football = new FootballLiveTracker(preferences());
+        rainAlerts = new RainAlerts(preferences());
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) {
             NotificationChannel chan = new NotificationChannel(CHANNEL, "ربات تلگرام جاوید",
@@ -302,6 +306,46 @@ public final class TelegramBotService extends Service {
             catch (Exception ignored) { }
         }, HourlyDigestPublisher.millisUntilNextHour(),
            HourlyDigestPublisher.HOUR_MS, TimeUnit.MILLISECONDS);
+        // 2-minute checking when live, otherwise 10 minutes to conserve data.
+        digestExecutor.scheduleWithFixedDelay(() -> {
+            if (!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
+                return;
+            long last=preferences().getLong(FootballLiveTracker.LAST_CHECK,0);
+            boolean inPlay=preferences().getBoolean("football_was_live",false);
+            long window=inPlay?TimeUnit.MINUTES.toMillis(2):TimeUnit.MINUTES.toMillis(10);
+            if (System.currentTimeMillis()-last<window) return;
+            try {
+                FootballLiveTracker.Update update=football.check();
+                boolean live=false;
+                for(FootballLiveTracker.Match m:update.snapshot.games)if(m.live){live=true;break;}
+                preferences().edit().putBoolean("football_was_live",live).apply();
+                if(!update.alerts.isEmpty()) {
+                    String secret=token();
+                    for(String alert:update.alerts) {
+                        if(!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
+                            break;
+                        digests.sendAlert(secret,alert);
+                    }
+                }
+            }catch(Exception ignored){
+                preferences().edit().putString("football_poll_issue",
+                    "بررسی فوتبال کامل نشد؛ در تلاش بعدی دوباره بررسی می‌شود.").apply();
+            }
+        }, 12, 120, TimeUnit.SECONDS);
+        // No weather report unless Salamanca or Ardabil transitions to rain.
+        digestExecutor.scheduleWithFixedDelay(() -> {
+            if (!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
+                return;
+            try {
+                RainAlerts.Report report=rainAlerts.check(true);
+                if(!report.notices.isEmpty()) {
+                    String secret=token();
+                    for(String alert:report.notices)
+                        if(running && preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
+                            digests.sendAlert(secret,alert);
+                }
+            }catch(Exception ignored){}
+        }, 40, 15*60, TimeUnit.SECONDS);
         return START_NOT_STICKY;
     }
 
@@ -384,7 +428,7 @@ public final class TelegramBotService extends Service {
             JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
             String username = me.getJSONObject("result").optString("username", "UnknownBot");
             preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v1.9.0 · در انتظار پیام‌ها");
+            status("متصل به @" + username + " · v2.0.0 · در انتظار پیام‌ها");
             ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -407,7 +451,7 @@ public final class TelegramBotService extends Service {
                             throw stopped;
                         }
                     }
-                    status("متصل به @" + username + " · v1.9.0 · آماده دریافت لینک");
+                    status("متصل به @" + username + " · v2.0.0 · آماده دریافت لینک");
                 } catch (Exception failure) {
                     if (!running) break;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
@@ -619,6 +663,29 @@ public final class TelegramBotService extends Service {
         }
         // Private digest is opt-in, and only an already approved member
         // can subscribe. Channel publication is configured separately by owner.
+        if ((text.equals("/footballnow") || text.startsWith("/footballnow@")) && isOwner(user)) {
+            sendText(chat,"⏳ در حال بررسی نتایج مهم اروپا و ایران از چند منبع...",tok);
+            digestExecutor.execute(() -> {
+                try {
+                    FootballLiveTracker.Snapshot snapshot=football.collect();
+                    sendText(chat,FootballLiveTracker.summary(snapshot),tok);
+                }catch(Exception ignored){
+                    try {sendText(chat,"⚠️ دریافت نتایج فوتبال موفق نبود.",tok);}
+                    catch(Exception ignoredAgain){}
+                }
+            });
+            return;
+        }
+        if ((text.equals("/footballstatus") || text.startsWith("/footballstatus@")) && isOwner(user)) {
+            sendText(chat,"⚽ وضعیت منبع فوتبال\n" +
+                preferences().getString(FootballLiveTracker.LAST_STATUS,
+                    "هنوز پایش نشده") +
+                "\n" + (preferences().getBoolean("football_was_live",false) ?
+                    "فاصله بررسی: حدود ۲ دقیقه" : "فاصله بررسی: حدود ۱۰ دقیقه") +
+                "\n🌧 وضعیت هواشناسی: " +
+                preferences().getString(RainAlerts.STATUS,"هنوز بررسی نشده"),tok);
+            return;
+        }
         if (text.equals("/digestjoin") || text.startsWith("/digestjoin@")) {
             BotUserStore.User member = userStore.find(user);
             if (!isOwner(user) && (member == null || !member.active || member.blocked)) {
@@ -627,7 +694,7 @@ public final class TelegramBotService extends Service {
             }
             String username = from.optString("username", from.optString("first_name", ""));
             userStore.setDigestOptIn(user, true, username);
-            sendText(chat, "✅ خبرنامه ساعتی فعال شد. خبرهای فوتبال، هوای سالامانکا و اردبیل و تیترهای ایران را دریافت می‌کنی.\nبرای توقف: /digestleave", tok);
+            sendText(chat, "✅ خبرنامه ساعتی فعال شد. گل‌ها و نتایج مهم فوتبال اروپا و ایران و هشدار بارندگی سالامانکا و اردبیل را دریافت می‌کنی. اخبار حذف شده‌اند.\nبرای توقف: /digestleave", tok);
             return;
         }
         if (text.equals("/digestleave") || text.startsWith("/digestleave@")) {
@@ -637,12 +704,12 @@ public final class TelegramBotService extends Service {
             return;
         }
         if (text.equals("/digesthelp") || text.startsWith("/digesthelp@")) {
-            sendText(chat, "📰 خبرنامه ساعتی Downloaderjavid\n" +
+            sendText(chat, "⚽ نتایج فوتبال و هشدار بارندگی Downloaderjavid\n" +
                 "/digestjoin عضویت داوطلبانه\n/digestleave لغو پیام خصوصی\n" +
                 (isOwner(user) ? "مدیریت:\n/digestto @ChannelName تنظیم کانال\n" +
                     "/digeston فعال‌سازی ساعتی\n/digestoff توقف انتشار\n" +
-                    "/digestpreview پیش‌نمایش واقعی\n/digestnow ارسال فوری\n/digeststatus وضعیت" :
-                    "خبرها از منابع عمومی با ذکر منبع تهیه می‌شوند."), tok);
+                    "/digestpreview پیش‌نمایش نتایج فوتبال\n/digestnow ارسال فوری\n/digeststatus وضعیت\n/footballnow نتایج اکنون\n/footballstatus سلامت منابع" :
+                    "فقط نتایج فوتبال و هشدار بارندگی، بدون اخبار عمومی."), tok);
             return;
         }
         if (text.startsWith("/digest") && isOwner(user)) {
@@ -672,7 +739,7 @@ public final class TelegramBotService extends Service {
                     return;
                 }
                 preferences().edit().putBoolean(HourlyDigestPublisher.ENABLED, true).apply();
-                sendText(chat, "✅ انتشار ساعتی روشن شد. اولین انتشار خودکار ابتدای ساعت بعد، " +
+                sendText(chat, "✅ نتایج فوتبال و هشدار بارندگی روشن شدند. خلاصه فوتبال ابتدای ساعت بعد، " +
                     "به وقت اسپانیا است؛ تا وقتی سرویس بات روی گوشی فعال بماند.\n" +
                     "برای ارسال همین حالا: /digestnow", tok);
                 return;
@@ -692,7 +759,7 @@ public final class TelegramBotService extends Service {
                 return;
             }
             if (text.equals("/digestpreview")) {
-                sendText(chat, "⏳ در حال دریافت جدیدترین داده‌ها؛ کمی صبر کن...", tok);
+                sendText(chat, "⏳ در حال بررسی نتایج فوتبال؛ اخبار حذف شده‌اند...", tok);
                 digestExecutor.execute(() -> {
                     try {
                         HourlyDigestPublisher.Report report = digests.build();
@@ -738,7 +805,7 @@ public final class TelegramBotService extends Service {
             sendText(chat, "سلام 👋\nلینک ویدیوی عمومی و مجاز را بفرست، حق دانلود را تأیید کن و ویدیو یا MP3 را انتخاب کن.\n"
                     + "/status: وضعیت بات\n/profile: حساب و سهمیه" +
                     "\n/privacy: نحوه ثبت تاریخچه\n/forgetmyhistory: حذف گزارش جزئی خود" +
-                    "\n/digesthelp: خبرنامه ساعتی فوتبال، هوا و اخبار ایران", tok);
+                    "\n/digesthelp: نتایج فوتبال و هشدار بارندگی، بدون اخبار", tok);
             return;
         }
         if (text.startsWith("/status")) {
