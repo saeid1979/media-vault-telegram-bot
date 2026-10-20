@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v2.0", LAVENDER, INK));
+        header.addView(badge("v2.0.1", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -637,60 +637,185 @@ public class MainActivity extends Activity {
         });
     }
 
+    /**
+     * Engine updates are independent of APK app updates. Stable and nightly
+     * have separate latest releases. Do not silently downgrade on channel
+     * changes, or mistake "ALREADY_UP_TO_DATE" for successful verification.
+     */
     private void updateEngine(boolean automatic) {
+        if (automatic) {
+            runEngineUpdate(true, false); // Nightly is recommended by yt-dlp.
+            return;
+        }
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("کانال به‌روزرسانی موتور yt-dlp")
+            .setMessage("Stable: نسخه پایدار با انتشار کمتر.\n" +
+                "Nightly: نسخه روزانه با رفع سریع‌تر مشکلات دانلود؛ احتمال ناپایداری بیشتر.\n\n" +
+                "انتخاب کن کدام نسخه بررسی و در صورت جدیدتر بودن نصب شود.")
+            .setItems(new String[]{
+                "🌙 Nightly — جدیدترین اصلاحات (پیشنهادی)",
+                "✅ Stable — پایدار"
+            }, (dialog, which) -> runEngineUpdate(false, which == 1))
+            .setNegativeButton("لغو", null)
+            .show();
+    }
+
+    private static final String ENGINE_STABLE_RELEASE =
+        "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest";
+    private static final String ENGINE_NIGHTLY_RELEASE =
+        "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest";
+
+    private static String latestEngineTag(boolean stable) throws Exception {
+        HttpURLConnection conn = (HttpURLConnection) new URL(
+            stable ? ENGINE_STABLE_RELEASE : ENGINE_NIGHTLY_RELEASE).openConnection();
+        conn.setConnectTimeout(12000);
+        conn.setReadTimeout(12000);
+        conn.setRequestProperty("Accept", "application/vnd.github+json");
+        conn.setRequestProperty("User-Agent", "JavidDownloader-Android/2.0.1");
+        try {
+            int code = conn.getResponseCode();
+            if (code != 200)
+                throw new java.io.IOException("GitHub HTTP " + code +
+                    (code == 403 || code == 429 ? " (محدودیت درخواست‌ها)" : ""));
+            try (InputStream input = conn.getInputStream();
+                 ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[4096];
+                int bytes;
+                while ((bytes = input.read(buffer)) != -1) {
+                    if (out.size() + bytes > 1024 * 1024)
+                        throw new java.io.IOException("پاسخ سرور بیش از حد بزرگ است");
+                    out.write(buffer, 0, bytes);
+                }
+                JSONObject response = new JSONObject(out.toString("UTF-8"));
+                String tag = response.optString("tag_name", "").trim();
+                if (!tag.matches("[0-9]{4}\\.[0-9]{1,2}\\.[0-9]{1,2}([.-][0-9A-Za-z.]+)?"))
+                    throw new java.io.IOException("شناسه نسخه دریافتی معتبر نیست");
+                return tag;
+            }
+        } finally {
+            conn.disconnect();
+        }
+    }
+
+    /** YYYY.MM.DD[.build] / YYYY.MM.DD[-build] version comparison. */
+    private static int compareEngineTags(String a, String b) {
+        if (a == null || b == null) return Integer.MIN_VALUE;
+        String[] left = a.replace('-', '.').split("\\.");
+        String[] right = b.replace('-', '.').split("\\.");
+        try {
+            if (left.length < 3 || right.length < 3) return Integer.MIN_VALUE;
+            for (int i = 0; i < Math.max(left.length, right.length); i++) {
+                long x = i < left.length ? Long.parseLong(left[i]) : 0;
+                long y = i < right.length ? Long.parseLong(right[i]) : 0;
+                if (x < y) return -1;
+                if (x > y) return 1;
+            }
+            return 0;
+        } catch (NumberFormatException invalidTag) {
+            return Integer.MIN_VALUE;
+        }
+    }
+
+    private void runEngineUpdate(boolean automatic, boolean stable) {
         if (!engineReady) {
-            engineUpdateStatus.setText("موتور هنوز آماده نیست. چند لحظه بعد دوباره امتحان کن.");
-            toast("در حال آماده‌سازی موتور دانلود");
+            engineUpdateStatus.setText("موتور هنوز آماده نیست. چند لحظه بعد امتحان کن.");
+            if (!automatic) toast("موتور آماده نیست");
+            return;
+        }
+        if (getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE)
+                .getBoolean("enabled", false)) {
+            engineUpdateStatus.setText("برای به‌روزرسانی ایمن موتور، ابتدا بات تلگرام را متوقف کن.");
+            if (!automatic) toast("ابتدا بات را متوقف کن");
             return;
         }
         if (busy) {
-            engineUpdateStatus.setText("یک عملیات دیگر در حال انجام است؛ پس از پایان دوباره امتحان کن.");
-            toast("لطفاً تا پایان عملیات فعلی منتظر بمان");
+            engineUpdateStatus.setText("دانلود یا عملیات دیگری در حال اجراست.");
+            if (!automatic) toast("لطفاً منتظر بمان");
             return;
         }
         if (!begin()) return;
-        String pending = automatic
-            ? "در حال بررسی خودکار به‌روزرسانی موتور..."
-            : "در حال بررسی نسخه جدید و دریافت به‌روزرسانی...";
+        String channel = stable ? "Stable" : "Nightly";
+        String pending = "در حال دریافت نسخه جدید " + channel + " از GitHub...";
         setStatus(pending, false);
-        detail.setText("برای این عملیات اتصال اینترنت لازم است.");
+        detail.setText("نسخه روی گوشی با جدیدترین انتشار رسمی مقایسه می‌شود.");
         engineUpdateStatus.setText(pending);
         engineUpdateStatus.setTextColor(NAVY);
         updateProgress.setVisibility(View.VISIBLE);
-        updateButton.setText("◌  در حال به‌روزرسانی...");
+        updateButton.setEnabled(false);
+        updateButton.setText("◌  در حال بررسی موتور...");
         executor.execute(() -> {
             try {
-                YoutubeDL.UpdateStatus result = YoutubeDL.getInstance()
-                    .updateYoutubeDL(getApplicationContext(), YoutubeDL.UpdateChannel._STABLE);
-                String version = YoutubeDL.getInstance().version(getApplicationContext());
-                long now = System.currentTimeMillis();
-                getPreferences(MODE_PRIVATE).edit().putLong("last_engine_check", now).apply();
-                String outcome = result == YoutubeDL.UpdateStatus.DONE
-                    ? "موتور دانلود با موفقیت به‌روز شد ✓"
-                    : "موتور دانلود از قبل به‌روز بود ✓";
-                String visible = outcome + (version == null || version.isEmpty() ? ""
-                    : "\nنسخه: " + version);
+                String before = YoutubeDL.getInstance().version(getApplicationContext());
+                String latest = latestEngineTag(stable);
+                int comparison = compareEngineTags(before, latest);
+                String selected = "کانال: " + channel;
+                if (comparison >= 0) {
+                    // Equality or a newer currently installed nightly means
+                    // an older stable channel must NOT overwrite it.
+                    String result = comparison == 0
+                        ? "این کانال نسخه جدیدتری ندارد."
+                        : "نسخه نصب‌شده جدیدتر از انتشار این کانال است؛ بازگشت به نسخه قدیمی انجام نشد.";
+                    String info = result + "\n" + selected +
+                        "\nنصب‌شده: " + before + "\nآخرین انتشار کانال: " + latest +
+                        (stable ? "\nبرای بررسی اصلاحات تازه، کانال Nightly را انتخاب کن." : "");
+                    getPreferences(MODE_PRIVATE).edit()
+                        .putLong("last_engine_check", System.currentTimeMillis()).apply();
+                    runOnUiThread(() -> {
+                        engineUpdateStatus.setText(info);
+                        engineUpdateStatus.setTextColor(TEAL);
+                        setStatus(result, false);
+                        detail.setText("موتور آماده دانلود است.");
+                        if (!automatic) toast(result);
+                    });
+                    return;
+                }
+
+                YoutubeDL.UpdateStatus status = YoutubeDL.getInstance().updateYoutubeDL(
+                    getApplicationContext(),
+                    stable ? YoutubeDL.UpdateChannel._STABLE : YoutubeDL.UpdateChannel._NIGHTLY);
+                String installed = YoutubeDL.getInstance().version(getApplicationContext());
+                // Verify the updated version, not merely the return status.
+                boolean verified = latest.equals(installed);
+                if (!verified || status != YoutubeDL.UpdateStatus.DONE) {
+                    String trouble = "آپدیت تأیید نشد؛ نسخه نصب‌شده و منبع یکسان نیستند.";
+                    runOnUiThread(() -> {
+                        engineUpdateStatus.setText(trouble + "\n" + selected +
+                            "\nقبل: " + (before == null ? "نامشخص" : before) +
+                            "\nجدید: " + (installed == null ? "نامشخص" : installed) +
+                            "\nانتشار GitHub: " + latest +
+                            "\nدوباره تلاش کن یا کانال دیگر را انتخاب کن.");
+                        engineUpdateStatus.setTextColor(Color.rgb(178, 50, 52));
+                        setStatus(trouble, true);
+                    });
+                    return;
+                }
+                getPreferences(MODE_PRIVATE).edit()
+                    .putLong("last_engine_check", System.currentTimeMillis()).apply();
+                String successful = "✅ موتور yt-dlp با موفقیت به‌روز شد";
                 runOnUiThread(() -> {
-                    setStatus(outcome, false);
-                    detail.setText("موتور آماده دانلود است.");
-                    engineUpdateStatus.setText(visible);
+                    engineUpdateStatus.setText(successful + "\n" + selected +
+                        "\nنسخه قبلی: " + (before == null ? "نامشخص" : before) +
+                        "\nنسخه نصب‌شده: " + installed);
                     engineUpdateStatus.setTextColor(TEAL);
-                    if (!automatic) toast(outcome);
+                    detail.setText("موتور جدید نصب و نسخه آن تأیید شد.");
+                    setStatus(successful, false);
+                    if (!automatic) toast("موتور به‌روز شد");
                 });
             } catch (Exception e) {
                 String error = message(e);
-                // A failed check must not be marked successful for the next 24h.
                 runOnUiThread(() -> {
-                    String failure = "به‌روزرسانی انجام نشد: " + error;
-                    setStatus(failure, true);
-                    detail.setText("اتصال اینترنت را بررسی و دوباره امتحان کن.");
-                    engineUpdateStatus.setText(failure + "\nبرای تلاش دوباره روی دکمه بالا بزن.");
+                    String failure = "⚠️ بررسی یا نصب موتور انجام نشد: " + error;
+                    engineUpdateStatus.setText(failure +
+                        "\nآخرین وضعیت موتور نامشخص است؛ پیام «قبلاً به‌روز بود» نمایش داده نمی‌شود.");
                     engineUpdateStatus.setTextColor(Color.rgb(178, 50, 52));
-                    if (!automatic) toast("به‌روزرسانی انجام نشد");
+                    setStatus("بررسی آپدیت ناموفق بود", true);
+                    detail.setText("اینترنت و دسترسی GitHub را بررسی کن و دوباره امتحان کن.");
+                    if (!automatic) toast("خطای بررسی آپدیت");
                 });
             } finally {
                 runOnUiThread(() -> {
                     updateProgress.setVisibility(View.GONE);
+                    updateButton.setEnabled(true);
                     updateButton.setText("↻  بررسی و به‌روزرسانی موتور");
                     end();
                 });
