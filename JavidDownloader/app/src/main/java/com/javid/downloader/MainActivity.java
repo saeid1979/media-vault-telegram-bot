@@ -656,8 +656,8 @@ public class MainActivity extends Activity {
         new android.app.AlertDialog.Builder(this)
             .setTitle("انتخاب کانال موتور yt-dlp")
             .setSingleChoiceItems(new String[]{
-                "🌙 Nightly — جدیدترین اصلاحات\\nمناسب برای رفع سریع خطاهای دانلود",
-                "✅ Stable — نسخه پایدار\\nبا انتشار کمتر و تغییرات آزمایش‌شده"
+                "🌙 Nightly — جدیدترین اصلاحات\nمناسب برای رفع سریع خطاهای دانلود",
+                "✅ Stable — نسخه پایدار\nبا انتشار کمتر و تغییرات آزمایش‌شده"
             }, selected[0], (dialog, which) -> selected[0] = which)
             .setPositiveButton("بررسی و نصب", (dialog, which) -> {
                 boolean stable = selected[0] == 1;
