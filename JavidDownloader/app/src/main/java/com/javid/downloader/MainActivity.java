@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v2.0.1", LAVENDER, INK));
+        header.addView(badge("v2.0.2", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -643,19 +643,28 @@ public class MainActivity extends Activity {
      * changes, or mistake "ALREADY_UP_TO_DATE" for successful verification.
      */
     private void updateEngine(boolean automatic) {
+        final boolean savedStable =
+            getPreferences(MODE_PRIVATE).getBoolean("engine_channel_stable", false);
         if (automatic) {
-            runEngineUpdate(true, false); // Nightly is recommended by yt-dlp.
+            runEngineUpdate(true, savedStable);
             return;
         }
+        // AlertDialog cannot reliably display both .setMessage() and .setItems():
+        // Android's message scroll view hides the list on some phones.
+        // A single-choice list without a message keeps BOTH channels visible.
+        final int[] selected = {savedStable ? 1 : 0};
         new android.app.AlertDialog.Builder(this)
-            .setTitle("کانال به‌روزرسانی موتور yt-dlp")
-            .setMessage("Stable: نسخه پایدار با انتشار کمتر.\n" +
-                "Nightly: نسخه روزانه با رفع سریع‌تر مشکلات دانلود؛ احتمال ناپایداری بیشتر.\n\n" +
-                "انتخاب کن کدام نسخه بررسی و در صورت جدیدتر بودن نصب شود.")
-            .setItems(new String[]{
-                "🌙 Nightly — جدیدترین اصلاحات (پیشنهادی)",
-                "✅ Stable — پایدار"
-            }, (dialog, which) -> runEngineUpdate(false, which == 1))
+            .setTitle("انتخاب کانال موتور yt-dlp")
+            .setSingleChoiceItems(new String[]{
+                "🌙 Nightly — جدیدترین اصلاحات\\nمناسب برای رفع سریع خطاهای دانلود",
+                "✅ Stable — نسخه پایدار\\nبا انتشار کمتر و تغییرات آزمایش‌شده"
+            }, selected[0], (dialog, which) -> selected[0] = which)
+            .setPositiveButton("بررسی و نصب", (dialog, which) -> {
+                boolean stable = selected[0] == 1;
+                getPreferences(MODE_PRIVATE).edit()
+                    .putBoolean("engine_channel_stable", stable).apply();
+                runEngineUpdate(false, stable);
+            })
             .setNegativeButton("لغو", null)
             .show();
     }
@@ -671,7 +680,7 @@ public class MainActivity extends Activity {
         conn.setConnectTimeout(12000);
         conn.setReadTimeout(12000);
         conn.setRequestProperty("Accept", "application/vnd.github+json");
-        conn.setRequestProperty("User-Agent", "JavidDownloader-Android/2.0.1");
+        conn.setRequestProperty("User-Agent", "JavidDownloader-Android/2.0.2");
         try {
             int code = conn.getResponseCode();
             if (code != 200)
