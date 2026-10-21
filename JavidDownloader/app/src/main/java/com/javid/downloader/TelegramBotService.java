@@ -59,9 +59,12 @@ import java.util.regex.Pattern;
 public final class TelegramBotService extends Service {
     public static final String ACTION_START = "com.javid.downloader.BOT_START";
     public static final String ACTION_STOP = "com.javid.downloader.BOT_STOP";
+    public static final String ACTION_RESUME = "com.javid.downloader.BOT_RESUME";
+    public static final String PREF_DESIRED = "bot_desired_running";
+    public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.0.0 · live football Europe/Iran + rain alerts; no news";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.1.0 · auto-reconnect, boot resume and live football";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -195,6 +198,34 @@ public final class TelegramBotService extends Service {
     private final Map<String, PendingDownload> pending = new ConcurrentHashMap<>();
     private volatile boolean running = false;
     private volatile HttpURLConnection pollConnection;
+    private ConnectivityManager connections;
+    private ConnectivityManager.NetworkCallback networkWatcher;
+    private void watchNetwork() {
+        if (Build.VERSION.SDK_INT < 24) return;
+        connections = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        if (connections == null) return;
+        networkWatcher = new ConnectivityManager.NetworkCallback() {
+            @Override public void onAvailable(Network network) {
+                if (!running) return;
+                status("🌐 اینترنت وصل شد؛ اتصال مجدد تلگرام...");
+                // Interrupt current long poll so it retries with the new network.
+                HttpURLConnection active = pollConnection;
+                if (active != null) active.disconnect();
+            }
+            @Override public void onLost(Network network) {
+                if (running) status("📴 اینترنت قطع شد؛ در انتظار اتصال مجدد...");
+            }
+        };
+        try { connections.registerDefaultNetworkCallback(networkWatcher); }
+        catch (Exception ignored) { networkWatcher = null; }
+    }
+    private void unwatchNetwork() {
+        if (connections != null && networkWatcher != null) {
+            try { connections.unregisterNetworkCallback(networkWatcher); }
+            catch (Exception ignored) { }
+        }
+        networkWatcher = null;
+    }
     private BotUserStore userStore;
     private BotStatsStore botStats;
     private BotDownloadLogStore audit;
@@ -279,19 +310,32 @@ public final class TelegramBotService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopBot();
+            stopBot(true);
             return START_NOT_STICKY;
         }
-        if (running) return START_NOT_STICKY;
-        running = true;
-        publishQueue();
-        if (Build.VERSION.SDK_INT >= 29) {
+        boolean isManual = intent != null && ACTION_START.equals(intent.getAction());
+        // START_STICKY may redeliver a null intent after Android reclaims the
+        // process. Only restart if owner previously requested it.
+        if (!isManual && !preferences().getBoolean(PREF_DESIRED, false)) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (running) return START_STICKY;
+        // specialUse is appropriate for a continuously visible, owner-controlled
+        // bot; dataSync is limited to 6h and forbidden at boot on Android 15.
+        if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIFICATION_ID, notification("در حال اتصال به تلگرام..."),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         } else {
             startForeground(NOTIFICATION_ID, notification("در حال اتصال به تلگرام..."));
         }
-        preferences().edit().putBoolean("enabled", true).apply();
+        running = true;
+        publishQueue();
+        SharedPreferences.Editor desiredState = preferences().edit()
+            .putBoolean("enabled", true).remove("auto_resume_issue");
+        if (isManual) desiredState.putBoolean(PREF_DESIRED, true);
+        desiredState.apply();
+        watchNetwork();
         status("در حال اتصال به بات تلگرام...");
         // Prime the media libraries in the background instead of repeating setup for each download.
         downloadExecutor.execute(() -> {
@@ -346,15 +390,19 @@ public final class TelegramBotService extends Service {
                 }
             }catch(Exception ignored){}
         }, 40, 15*60, TimeUnit.SECONDS);
-        return START_NOT_STICKY;
+        return START_STICKY;
     }
 
-    private void stopBot() {
+    private void stopBot(boolean manual) {
         running = false;
         HttpURLConnection c = pollConnection;
         if (c != null) c.disconnect();
-        preferences().edit().putBoolean("enabled", false).putInt("current_downloads", 0).apply();
-        status("ربات متوقف است");
+        SharedPreferences.Editor stopped = preferences().edit()
+            .putBoolean("enabled", false).putInt("current_downloads", 0);
+        if (manual) stopped.putBoolean(PREF_DESIRED, false);
+        stopped.apply();
+        status(manual ? "بات توسط مالک خاموش شد" : "بات توسط اندروید متوقف شد");
+        unwatchNetwork();
         downloadExecutor.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
@@ -371,6 +419,8 @@ public final class TelegramBotService extends Service {
         downloadExecutor.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
+        unwatchNetwork();
+        if (audit != null) audit.close();
         if (botStats != null) botStats.close();
         if (userStore != null) userStore.close();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
@@ -380,7 +430,7 @@ public final class TelegramBotService extends Service {
 
     @Override public void onTimeout(int startId, int fgsType) {
         status("محدودیت زمانی اجرای پس‌زمینه اندروید؛ ربات متوقف شد");
-        stopBot();
+        stopBot(false);
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
@@ -421,17 +471,25 @@ public final class TelegramBotService extends Service {
         }
     }
 
+    /**
+     * Persistent polling: network outages, temporary Telegram errors and
+     * startup without connectivity retry until the owner stops the bot.
+     * Critically, getMe must be INSIDE the retry loop.
+     */
     private void loop() {
         long cursor = preferences().getLong("update_id", 0L);
+        String username = preferences().getString("bot_username", "");
+        int errors = 0;
         try {
-            String apiToken = token();
-            JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
-            String username = me.getJSONObject("result").optString("username", "UnknownBot");
-            preferences().edit().putString("bot_username", username).apply();
-            status("متصل به @" + username + " · v2.0.0 · در انتظار پیام‌ها");
-            ensurePairCode();
             while (running && !Thread.currentThread().isInterrupted()) {
                 try {
+                    String apiToken = token();
+                    if (username.isEmpty() || errors > 0) {
+                        JSONObject me = call("getMe", new JSONObject(), 10000, apiToken);
+                        username = me.getJSONObject("result").optString("username", "UnknownBot");
+                        preferences().edit().putString("bot_username", username).apply();
+                        ensurePairCode();
+                    }
                     JSONObject params = new JSONObject();
                     params.put("timeout", 20);
                     params.put("offset", cursor);
@@ -446,25 +504,30 @@ public final class TelegramBotService extends Service {
                         try {
                             dispatch(update, apiToken);
                             preferences().edit().putLong("update_id", cursor).apply();
-                        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+                        } catch (java.util.concurrent.RejectedExecutionException stopping) {
                             if (!running) break;
-                            throw stopped;
+                            throw stopping;
                         }
                     }
-                    status("متصل به @" + username + " · v2.0.0 · آماده دریافت لینک");
+                    errors = 0;
+                    status("✅ متصل به @" + username + " · v2.1.0 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
+                    errors++;
                     String desc = failure.getMessage() == null ? "" : failure.getMessage();
-                    if (desc.contains("409") || desc.toLowerCase().contains("conflict")) {
-                        status("تداخل: بات روی سرور یا گوشی دیگری فعال است. اجرای قبلی را متوقف کن.");
-                    } else {
-                        status("اتصال تلگرام قطع شد؛ تلاش مجدد...");
+                    if (desc.contains("409") || desc.toLowerCase(java.util.Locale.ROOT).contains("conflict"))
+                        status("بات روی دستگاه یا سرور دیگری هم فعال است (Telegram 409)");
+                    else if (desc.contains("401"))
+                        status("توکن بات معتبر نیست؛ در تنظیمات بررسی کن");
+                    else status("📴 اتصال تلگرام قطع است؛ تلاش خودکار برای اتصال مجدد...");
+                    try {
+                        Thread.sleep(Math.min(30000L, 3000L * Math.min(8, errors)));
+                    } catch (InterruptedException stopped) {
+                        Thread.currentThread().interrupt();
+                        break;
                     }
-                    Thread.sleep(4000);
                 }
             }
-        } catch (Exception ignored) {
-            status("اتصال برقرار نشد؛ توکن بات و اینترنت را بررسی کن");
         } finally {
             running = false;
             preferences().edit().putBoolean("enabled", false).apply();
