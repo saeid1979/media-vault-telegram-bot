@@ -20,6 +20,11 @@ public final class BotAutoStartReceiver extends BroadcastReceiver {
             !Intent.ACTION_USER_UNLOCKED.equals(action)) return;
         SharedPreferences prefs = context.getSharedPreferences(
             TelegramBotService.PREFS, Context.MODE_PRIVATE);
+        // One-time migration: a running pre-2.1 bot had only 'enabled'.
+        // Preserve that owner's existing choice when the APK is upgraded.
+        if (!prefs.contains(TelegramBotService.PREF_DESIRED) &&
+            prefs.getBoolean("enabled", false) && BotSecrets.hasToken(context))
+            prefs.edit().putBoolean(TelegramBotService.PREF_DESIRED, true).apply();
         if (!prefs.getBoolean(TelegramBotService.PREF_AUTO_RESUME, true) ||
             !prefs.getBoolean(TelegramBotService.PREF_DESIRED, false)) return;
         if (!BotSecrets.hasToken(context)) return;
