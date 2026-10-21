@@ -336,6 +336,10 @@ public final class TelegramBotService extends Service {
         if (isManual) desiredState.putBoolean(PREF_DESIRED, true);
         desiredState.apply();
         watchNetwork();
+        progressExecutor.scheduleAtFixedRate(() -> {
+            if (running) preferences().edit()
+                .putLong("service_heartbeat", System.currentTimeMillis()).apply();
+        }, 0, 30, TimeUnit.SECONDS);
         status("در حال اتصال به بات تلگرام...");
         // Prime the media libraries in the background instead of repeating setup for each download.
         downloadExecutor.execute(() -> {
@@ -403,6 +407,7 @@ public final class TelegramBotService extends Service {
         stopped.apply();
         status(manual ? "بات توسط مالک خاموش شد" : "بات توسط اندروید متوقف شد");
         unwatchNetwork();
+        preferences().edit().putLong("service_heartbeat", 0L).apply();
         downloadExecutor.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
@@ -420,6 +425,7 @@ public final class TelegramBotService extends Service {
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
         unwatchNetwork();
+        preferences().edit().putLong("service_heartbeat", 0L).apply();
         if (audit != null) audit.close();
         if (botStats != null) botStats.close();
         if (userStore != null) userStore.close();
