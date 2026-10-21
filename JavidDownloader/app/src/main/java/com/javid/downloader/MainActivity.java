@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v2.0.2", LAVENDER, INK));
+        header.addView(badge("v2.1.0", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
@@ -343,6 +343,8 @@ public class MainActivity extends Activity {
         botCard.addView(controls);
         run.setOnClickListener(v -> startTelegramBot());
         stop.setOnClickListener(v -> {
+            getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE).edit()
+                .putBoolean(TelegramBotService.PREF_DESIRED, false).apply();
             Intent intent = new Intent(this, TelegramBotService.class).setAction(TelegramBotService.ACTION_STOP);
             startService(intent);
             toast("دستور توقف ارسال شد");
@@ -378,6 +380,40 @@ public class MainActivity extends Activity {
                 .putBoolean("wifi_only", checked).apply();
         });
         botCard.addView(wifiOnly);
+        botCard.addView(gap(15));
+        botCard.addView(label("🔄 روشن ماندن و راه‌اندازی خودکار بات", 16, INK, true));
+        botCard.addView(gap(5));
+        botCard.addView(label("پس از روشن شدن گوشی یا آپدیت برنامه، باتی که قبلاً روشن کرده‌ای دوباره فعال می‌شود. " +
+            "پس از برگشت اینترنت هم بدون دخالت تو به تلگرام متصل می‌شود. خاموش کردن دستی بات این حالت را متوقف می‌کند.",
+            12, MUTED, false));
+        botCard.addView(gap(7));
+        android.widget.Switch autoResumeSwitch = new android.widget.Switch(this);
+        autoResumeSwitch.setText("راه‌اندازی خودکار بات بعد از روشن شدن گوشی");
+        autoResumeSwitch.setTextSize(13);
+        autoResumeSwitch.setTextColor(INK);
+        SharedPreferences autoPrefs = getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE);
+        autoResumeSwitch.setChecked(autoPrefs.getBoolean(TelegramBotService.PREF_AUTO_RESUME, true));
+        autoResumeSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            autoPrefs.edit().putBoolean(TelegramBotService.PREF_AUTO_RESUME, checked).apply();
+            toast(checked ? "راه‌اندازی خودکار بات فعال شد" : "راه‌اندازی خودکار غیرفعال شد");
+        });
+        botCard.addView(autoResumeSwitch);
+        botCard.addView(gap(10));
+        Button batterySettings = styledButton("⚙️  تنظیمات باتری و اجرای پس‌زمینه گوشی",
+            Color.rgb(230, 235, 248), INK, 12, 13);
+        botCard.addView(batterySettings, new LinearLayout.LayoutParams(-1, dp(49)));
+        batterySettings.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Exception unavailable) {
+                startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+            }
+        });
+        botCard.addView(gap(7));
+        botCard.addView(label("در تنظیمات گوشی، حالت باتری برنامه را «نامحدود / Unrestricted» انتخاب کن " +
+            "و اجازه اجرای خودکار و در پس‌زمینه را بده. بعضی گوشی‌ها پس از بستن اجباری برنامه جلوی شروع خودکار را می‌گیرند.",
+            12, MUTED, false));
         botCard.addView(gap(13));
         botCard.addView(label("اعضا و انتقال کاربران قبلی", 15, INK, true));
         botCard.addView(gap(6));
@@ -548,6 +584,8 @@ public class MainActivity extends Activity {
             Intent start = new Intent(this, TelegramBotService.class);
             start.setAction(TelegramBotService.ACTION_START);
             startForegroundService(start);
+            getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE).edit()
+                .putBoolean(TelegramBotService.PREF_DESIRED, true).apply();
             toast("ربات روی گوشی در حال راه‌اندازی است");
             botUiHandler.postDelayed(this::refreshBotUi, 1500);
         } catch (Exception e) {
@@ -562,7 +600,9 @@ public class MainActivity extends Activity {
             ? "توکن ذخیره شده · " + (p.getString("bot_username", "").isEmpty()
                 ? "در انتظار اتصال" : "@" + p.getString("bot_username", ""))
             : "هنوز توکن ذخیره نشده");
-        botStatus.setText(p.getString(TelegramBotService.KEY_STATUS, "بات خاموش است"));
+        String botMessage = p.getString(TelegramBotService.KEY_STATUS, "بات خاموش است");
+        String autoIssue = p.getString("auto_resume_issue", "");
+        botStatus.setText(botMessage + (autoIssue.isEmpty() ? "" : "\n" + autoIssue));
         botStatus.setTextColor(p.getBoolean("enabled", false) ? TEAL : MUTED);
         long owner = p.getLong("owner_id", 0L);
         if (owner != 0L) {
@@ -578,6 +618,21 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        // Recover after Android terminates a process but sticky resurrection is
+        // delayed. Here we are foregrounded by a direct owner action.
+        SharedPreferences p = getSharedPreferences(TelegramBotService.PREFS, MODE_PRIVATE);
+        if (!p.contains(TelegramBotService.PREF_DESIRED) &&
+            p.getBoolean("enabled", false) && BotSecrets.hasToken(this))
+            p.edit().putBoolean(TelegramBotService.PREF_DESIRED, true).apply();
+        if (p.getBoolean(TelegramBotService.PREF_DESIRED, false) &&
+            p.getBoolean(TelegramBotService.PREF_AUTO_RESUME, true) &&
+            BotSecrets.hasToken(this) &&
+            System.currentTimeMillis() - p.getLong("service_heartbeat", 0) > 90000L) {
+            try {
+                startForegroundService(new Intent(this, TelegramBotService.class)
+                    .setAction(TelegramBotService.ACTION_RESUME));
+            } catch (Exception failure) { }
+        }
         botUiHandler.removeCallbacks(botUiTick);
         botUiHandler.post(botUiTick);
     }
