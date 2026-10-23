@@ -1,0 +1,72 @@
+name: Javid Downloader Source ZIP
+on:
+  push:
+    branches:
+      - feature/javid-downloader-android-v1
+    paths:
+      - '.github/workflows/javid-downloader-source-export.yml'
+  workflow_dispatch:
+jobs:
+  export_source:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v4
+      - name: Package Android source without private signing files
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, zipfile
+          from zipfile import ZIP_DEFLATED
+          root=Path('.')
+          archive=Path('JavidDownloader-v2.5.0-SOURCE.zip')
+          files=subprocess.check_output(
+              ['git','ls-files','-z','--','JavidDownloader/']
+          ).split(b'\0')
+          forbidden_parts={
+              'build','.gradle','.git','outputs','node_modules',
+              '.idea','.cxx','tmp','temp','private','secrets'
+          }
+          denied_ext={'.apk','.aab','.jks','.keystore','.p12','.pfx',
+                      '.zip','.pem','.key','.env','.log'}
+          denied_names={'local.properties','google-services.json',
+              'secret.properties','credentials.json','gradle.properties.local'}
+          added=[]
+          with zipfile.ZipFile(archive,'w',compression=ZIP_DEFLATED,compresslevel=8) as out:
+              for raw in files:
+                  if not raw: continue
+                  name=raw.decode('utf-8')
+                  src=root/name
+                  parts={p.lower() for p in src.parts}
+                  if not src.is_file() or parts & forbidden_parts:
+                      continue
+                  if src.suffix.lower() in denied_ext or src.name.lower() in denied_names:
+                      continue
+                  lowered=name.lower()
+                  if any(word in lowered for word in ('signing-backup',
+                      'private-key','access-token','secret-key')):
+                      continue
+                  out.write(src,arcname=name)
+                  added.append(name)
+              out.writestr('SOURCE-README-FA.txt',
+                  'Javid Downloader Android v2.5.0\n'
+                  'Source branch: feature/javid-downloader-android-v1\n'
+                  'Build: cd JavidDownloader && gradle :app:assembleDebug\n'
+                  'Release-signing keystore and credentials are intentionally excluded.\n'
+                  'Project sources include Java classes, AndroidManifest, resources and Gradle configuration.\n')
+          assert any(x.endswith('.java') for x in added), 'Java source missing'
+          assert any(x.endswith('build.gradle') for x in added), 'Gradle config missing'
+          print('Source files packaged:',len(added))
+          print('Size:',archive.stat().st_size)
+          print('Excluded private keys, credentials and binary APKs.')
+          PY
+      - name: Upload source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: JavidDownloader-v2.5.0-SOURCE
+          path: JavidDownloader-v2.5.0-SOURCE.zip
+          if-no-files-found: error
+          retention-days: 30
