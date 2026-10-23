@@ -619,6 +619,48 @@ public final class TelegramBotService extends Service {
             long who = from.optLong("id");
             long chat = message.getJSONObject("chat").optLong("id");
             int promptId = message.optInt("message_id", 0);
+            String weatherData=callback.optString("data","");
+            if(weatherData.startsWith("wx:")){
+                JSONObject destination=message.optJSONObject("chat");
+                if(destination==null || !"private".equals(destination.optString("type")))return;
+                if(!canUseMenuFeatures(who)){
+                    sendText(chat,accessMessage(who),tok);return;
+                }
+                String[] parts=weatherData.split(":");
+                if(parts.length==3 && "page".equals(parts[1])){
+                    String page=parts[2];
+                    if(!"my".equals(page)&&!"spain".equals(page)&&!"iran".equals(page))return;
+                    showWeather(who,chat,tok,page,promptId,"");
+                    return;
+                }
+                if(parts.length==3 && "toggle".equals(parts[1])){
+                    if(weatherStore.get(parts[2])==null)return;
+                    String result=weatherStore.toggle(who,parts[2]);
+                    showWeather(who,chat,tok,"my",promptId,result);
+                    return;
+                }
+                if(parts.length==3 && "add".equals(parts[1])){
+                    PendingCity pendingCity=pendingCityResults.remove(parts[2]);
+                    if(pendingCity==null || pendingCity.user!=who ||
+                        System.currentTimeMillis()>pendingCity.expires){
+                        sendText(chat,"نتیجه جستجو منقضی شده؛ دوباره نام شهر را جستجو کن.",tok);
+                        return;
+                    }
+                    String result=weatherStore.addFound(who,pendingCity.city);
+                    showWeather(who,chat,tok,"my",promptId,result);
+                    return;
+                }
+                if(parts.length==2 && "search".equals(parts[1])){
+                    waitingCityQuery.put(who,true);
+                    sendText(chat,"🔎 نام شهر را بنویس؛ مثلاً:\nMadrid\nیا\nPorto\n"+
+                        "همچنین می‌توانی مستقیم /weathersearch Berlin را بفرستی.",tok);
+                    return;
+                }
+                if(parts.length==2 && "now".equals(parts[1])){
+                    currentUserWeather(who,chat,tok);return;
+                }
+                return;
+            }
             String footballData=callback.optString("data","");
             if(footballData.startsWith("fx:") || footballData.startsWith("table:")) {
                 JSONObject chatInfo=message.optJSONObject("chat");
@@ -796,7 +838,28 @@ public final class TelegramBotService extends Service {
             text.equals("/menu") || text.startsWith("/menu@") ||
             text.equals("🏠 منوی اصلی")) {
             nextLinkFormat.remove(user);
+            waitingCityQuery.remove(user);
             welcomeMenu(user,chat,tok);
+            return;
+        }
+        if(text.startsWith("/weathersearch ") || text.startsWith("/citysearch ")){
+            String cityName=text.substring(text.indexOf(' ')+1).trim();
+            waitingCityQuery.remove(user);
+            searchWeatherCity(user,chat,tok,cityName);
+            return;
+        }
+        if(text.equals("🌧 آب‌وهوا") || text.equals("/weather") ||
+            text.equals("/cities")){
+            if(!canUseMenuFeatures(user))sendText(chat,accessMessage(user),tok);
+            else showWeather(user,chat,tok,"my",0,"");
+            return;
+        }
+        if(text.equals("/weatherstatus") || text.equals("🌤 وضعیت شهرهای من")){
+            currentUserWeather(user,chat,tok);return;
+        }
+        if(Boolean.TRUE.equals(waitingCityQuery.remove(user)) &&
+            !text.startsWith("/") && !text.startsWith("http")){
+            searchWeatherCity(user,chat,tok,text);
             return;
         }
         if(text.equals("📅 برنامه بازی‌ها") || text.equals("/fixtures") ||
@@ -822,6 +885,7 @@ public final class TelegramBotService extends Service {
                 "⚽ فوتبال ایران و جهان: نتایج جدید\n"+
                 "📅 برنامه بازی‌ها: امروز، فردا و هفته آینده\n"+
                 "🏆 جدول لیگ‌ها: امتیاز و رده‌بندی تیم‌ها\n"+
+                "🌧 آب‌وهوا: انتخاب شهر و هشدار احتمال بارندگی\n"+
                 "⬇️ ویدیو و 🎵 MP3: انتخاب کن، سپس لینک مجاز بفرست\n"+
                 "🔔 اعلان‌ها: عضویت یا توقف دریافت\n"+
                 "⭐ تیم‌های محبوب: انتخاب تیم و اعلان گل اختصاصی\n"+
@@ -947,7 +1011,8 @@ public final class TelegramBotService extends Service {
                     "/digeston فعال‌سازی ساعتی\n/digestoff توقف انتشار\n" +
                     "/digestpreview پیش‌نمایش نتایج فوتبال\n/digestnow ارسال فوری\n/digeststatus وضعیت\n/footballnow نتایج جهان\n/footballiran لیگ برتر ایران و گل‌زن‌ها\n/footballstatus سلامت منابع" :
                     "فقط نتایج فوتبال و هشدار بارندگی، بدون اخبار عمومی.\n"+
-                    "/myteams برای انتخاب تیم‌های محبوب"), tok);
+                    "/myteams انتخاب تیم‌های محبوب\n/weather انتخاب شهر"+
+                    "\n/weathersearch Madrid جستجوی شهر"), tok);
             return;
         }
         if (text.startsWith("/digest") && isOwner(user)) {
@@ -1045,6 +1110,7 @@ public final class TelegramBotService extends Service {
                 "\n/footballnow فوتبال جهان | /digestjoin عضویت اعلان‌ها"+
                 "\n/digestleave قطع اعلان‌ها | /myteams تیم‌های محبوب"+
                 "\n/fixtures برنامه مسابقات | /table جدول لیگ‌ها"+
+                "\n/weather انتخاب شهر | /weathersearch Madrid جستجو"+
                 "\n/privacy حریم خصوصی",mainMenu(),tok);
             return;
         }
