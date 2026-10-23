@@ -32,8 +32,10 @@ final class HourlyDigestPublisher {
 
     private final SharedPreferences prefs;
     private final BotUserStore users;
-    HourlyDigestPublisher(Context context, SharedPreferences prefs, BotUserStore users) {
-        this.prefs=prefs;this.users=users;
+    private final TeamFavoritesStore favorites;
+    HourlyDigestPublisher(Context context, SharedPreferences prefs, BotUserStore users,
+                          TeamFavoritesStore favorites) {
+        this.prefs=prefs;this.users=users;this.favorites=favorites;
     }
     static boolean channelValid(String chat) {
         return chat!=null && (chat.matches("@[A-Za-z][A-Za-z0-9_]{4,31}") ||
@@ -50,6 +52,7 @@ final class HourlyDigestPublisher {
     static final class Report {
         String content="";
         boolean hasScores;
+        FootballLiveTracker.Snapshot snapshot;
         int channelSent,privateSent,failed;
         String status() {
             return "کانال: "+channelSent+" | خصوصی: "+privateSent+
@@ -59,6 +62,7 @@ final class HourlyDigestPublisher {
     Report build() {
         Report r=new Report();
         FootballLiveTracker.Snapshot snap=new FootballLiveTracker(prefs).collect();
+        r.snapshot=snap;
         r.hasScores=snap.sourcesOk>0 && !snap.games.isEmpty();
         r.content="⚽ نتایج مهم فوتبال جهان — Downloaderjavid\n"+
             "🕒 "+ZonedDateTime.now(SPAIN).format(
@@ -140,30 +144,115 @@ final class HourlyDigestPublisher {
         return r;
     }
     Report publish(String token,boolean manual) {
-        Report r=new Report();
+        Report result=new Report();
         if(!prefs.getBoolean(ENABLED,false)) {
-            r.content="اطلاع‌رسانی خودکار خاموش است.";return r;
+            result.content="اطلاع‌رسانی خودکار خاموش است.";
+            return result;
         }
         String hour=hourKey();
         if(!manual && hour.equals(prefs.getString(LAST_HOUR,""))) {
-            r.content="گزارش این ساعت قبلاً فرستاده شد.";return r;
+            result.content="گزارش این ساعت قبلاً فرستاده شد.";
+            return result;
         }
         String channel=prefs.getString(TARGET,"");
-        if(!channelValid(channel)&&users.digestRecipients().isEmpty()){
-            r.content="کانال تنظیم نشده و هیچ کاربر داوطلب دریافت خصوصی نیست.";
-            return r;
+        List<BotUserStore.User> recipients=users.digestRecipients();
+        if(!channelValid(channel)&&recipients.isEmpty()){
+            result.content="کانال تنظیم نشده و هیچ کاربر داوطلب دریافت خصوصی نیست.";
+            return result;
         }
         Report built=build();
         if(!built.hasScores) {
-            // Never flood the channel with "no sources" or fabricated results.
             prefs.edit().putString(LAST_RESULT,
                 "نتیجه مهم تازه‌ای نبود یا منابع در دسترس نبودند؛ پیامی منتشر نشد.").apply();
             return built;
         }
-        Report sent=sendAlert(token,built.content);
-        sent.hasScores=built.hasScores;
-        if(sent.channelSent+sent.privateSent>0)
-            prefs.edit().putString(LAST_HOUR,hour).apply();
-        return sent;
+        result.content=built.content;
+        result.snapshot=built.snapshot;
+        result.hasScores=true;
+        if(channelValid(channel)) {
+            try {send(token,channel,built.content);result.channelSent++;}
+            catch(Exception failure){result.failed++;}
+        }
+        for(BotUserStore.User member:recipients){
+            if(Thread.currentThread().isInterrupted())break;
+            try {
+                BotUserStore.User current=users.find(member.id);
+                if(current==null||!current.active||current.blocked||
+                    !current.digestSubscribed)continue;
+                String msg=built.content;
+                if(favorites.favoritesOnly(current.id)) {
+                    msg=personalizedFootball(built.snapshot,favorites.ids(current.id));
+                    if(msg.isEmpty())continue;
+                }
+                send(token,String.valueOf(current.id),msg);
+                result.privateSent++;
+            }catch(Exception failure){result.failed++;}
+            try{Thread.sleep(210);}catch(InterruptedException stopped){
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if(result.channelSent+result.privateSent>0) {
+            prefs.edit().putString(LAST_HOUR,hour)
+                .putLong(LAST_SENT,System.currentTimeMillis())
+                .putString(LAST_RESULT,result.status()).apply();
+        }else {
+            // No favorite team match this hour is expected, not a transmission error.
+            prefs.edit().putString(LAST_HOUR,hour)
+                .putString(LAST_RESULT,result.failed>0 ?
+                    "خطای ارسال خبرنامه" : "تیم محبوبی در نتایج این ساعت نبود").apply();
+        }
+        return result;
     }
+
+    /** Live goal/final events are dispatched to the selected team subscribers
+     * only. A configured public channel still gets ALL important results.
+     * Rain notifications use sendAlert(), which is intentionally unfiltered.
+     */
+    Report sendFootballAlert(String token, FootballLiveTracker.FootballAlert event) {
+        Report r=new Report();
+        r.content=event.text;
+        if(!prefs.getBoolean(ENABLED,false))return r;
+        String channel=prefs.getString(TARGET,"");
+        if(channelValid(channel)){
+            try {send(token,channel,event.text);r.channelSent++;}
+            catch(Exception failure){r.failed++;}
+        }
+        for(BotUserStore.User user:users.digestRecipients()) {
+            if(Thread.currentThread().isInterrupted())break;
+            try {
+                BotUserStore.User current=users.find(user.id);
+                if(current==null||!current.active||current.blocked||
+                    !current.digestSubscribed)continue;
+                if(!favorites.relevant(user.id,event.match))continue;
+                send(token,String.valueOf(user.id),event.text);
+                r.privateSent++;
+            }catch(Exception failure){r.failed++;}
+            try{Thread.sleep(210);}catch(InterruptedException stopped){
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if(r.channelSent+r.privateSent>0)
+            prefs.edit().putLong(LAST_SENT,System.currentTimeMillis())
+                .putString(LAST_RESULT,r.status()).apply();
+        else if(r.failed>0)
+            prefs.edit().putString(LAST_RESULT,"ارسال اعلان فوتبال ناموفق بود.").apply();
+        return r;
+    }
+
+    private static String personalizedFootball(FootballLiveTracker.Snapshot snap,
+                                               java.util.Set<String> selected) {
+        StringBuilder text=new StringBuilder("⭐ نتایج تیم‌های محبوب شما\n");
+        int matches=0;
+        for(FootballLiveTracker.Match match:snap.games){
+            if(!TeamFavoritesStore.includes(selected,match))continue;
+            if(matches++>=12)break;
+            text.append("\n").append(match.line()).append("\n");
+        }
+        if(matches==0)return "";
+        text.append("\n🔕 لغو اشتراک: /digestleave");
+        return text.toString();
+    }
+
 }
