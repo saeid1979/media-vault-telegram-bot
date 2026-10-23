@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         header.addView(label("JAVID", 26, Color.rgb(214, 64, 78), true));
         header.addView(label("dl", 26, INK, true));
         header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-        header.addView(badge("v2.3.0", LAVENDER, INK));
+        header.addView(badge("v2.4.0", LAVENDER, INK));
         content.addView(header, margin(0, 9, 0, 24));
 
         downloadPanel = vertical();
