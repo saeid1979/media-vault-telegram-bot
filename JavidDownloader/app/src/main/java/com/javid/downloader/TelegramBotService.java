@@ -64,7 +64,7 @@ public final class TelegramBotService extends Service {
     public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.1.2 · expanded Iranian goal scorer coverage";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.2.0 · Persian Telegram interactive menus";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -151,6 +151,7 @@ public final class TelegramBotService extends Service {
     }
     private final AtomicInteger outstandingDownloads = new AtomicInteger();
     private final Map<Long, Boolean> userDownloads = new ConcurrentHashMap<>();
+    private final Map<Long,String> nextLinkFormat = new ConcurrentHashMap<>();
     private volatile boolean mediaInitialized = false;
     private final Object mediaLock = new Object();
     private void ensureMediaReady() throws Exception {
@@ -239,6 +240,10 @@ public final class TelegramBotService extends Service {
     private boolean isOwner(long who) { return who == preferences().getLong("owner_id", 0L); }
     private boolean canDownload(long who) {
         return isOwner(who) || BotUserStore.allowed(userStore.find(who));
+    }
+    private boolean canUseMenuFeatures(long who) {
+        BotUserStore.User member=userStore.find(who);
+        return isOwner(who) || member!=null && member.active && !member.blocked;
     }
     private String accessMessage(long who) {
         BotUserStore.User u = userStore.find(who);
@@ -516,7 +521,7 @@ public final class TelegramBotService extends Service {
                         }
                     }
                     errors = 0;
-                    status("✅ متصل به @" + username + " · v2.1.2 · بات فعال است");
+                    status("✅ متصل به @" + username + " · v2.2.0 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
                     errors++;
@@ -713,6 +718,63 @@ public final class TelegramBotService extends Service {
             }
             return;
         }
+        if(!isOwner(user))
+            userStore.pending(user,from.optString("username",from.optString("first_name","")));
+        if(text.equals("/start") || text.startsWith("/start@") ||
+            text.equals("/menu") || text.startsWith("/menu@") ||
+            text.equals("🏠 منوی اصلی")) {
+            nextLinkFormat.remove(user);
+            welcomeMenu(user,chat,tok);
+            return;
+        }
+        if(text.equals("❓ راهنما")) {
+            sendText(chat,"📖 راهنما\n"+
+                "⚽ فوتبال ایران و جهان: نتایج جدید\n"+
+                "⬇️ ویدیو و 🎵 MP3: انتخاب کن، سپس لینک مجاز بفرست\n"+
+                "🔔 اعلان‌ها: عضویت یا توقف دریافت\n"+
+                "👤 حساب من: بررسی سهمیه\n"+
+                "🏠 بازگشت به منوی اصلی",mainMenu(),tok);
+            return;
+        }
+        if(text.equals("🔔 اعلان‌ها")) {
+            sendText(chat,"🔔 مدیریت اعلان‌های فوتبال و بارندگی\n"+
+                "عضویت اختیاری است و هر زمان قابل لغو است.",
+                alertsMenu(),tok);
+            return;
+        }
+        if(text.equals("⚙️ تنظیمات")) {
+            sendText(chat,"⚙️ تنظیمات و وضعیت ربات",settingsMenu(),tok);
+            return;
+        }
+        if(text.equals("✅ عضویت اعلان‌ها"))text="/digestjoin";
+        else if(text.equals("🔕 قطع اعلان‌ها"))text="/digestleave";
+        else if(text.equals("ℹ️ راهنمای اعلان‌ها"))text="/digesthelp";
+        else if(text.equals("👤 حساب من"))text="/profile";
+        else if(text.equals("📋 وضعیت بات"))text="/status";
+        else if(text.equals("🔒 حریم خصوصی"))text="/privacy";
+        else if(text.equals("📊 سلامت منابع فوتبال"))text="/footballstatus";
+        else if(text.equals("🇮🇷 فوتبال ایران"))text="/footballiran";
+        else if(text.equals("🌍 فوتبال جهان"))text="/footballnow";
+        if(text.equals("⬇️ دانلود ویدیو") || text.equals("🎵 دانلود MP3")) {
+            if(!canUseMenuFeatures(user)) {
+                sendText(chat,accessMessage(user),tok);
+                return;
+            }
+            String format=text.startsWith("⬇️")?"v":"a";
+            nextLinkFormat.put(user,format);
+            sendText(chat,"📎 لینک عمومی و مجاز را بفرست.\n"+
+                (format.equals("a")?"🎵 پس از ارسال، MP3 را تأیید کن.":
+                    "🎬 پس از ارسال، کیفیت ویدیو را انتخاب کن.")+
+                "\nبرای لغو انتخاب، دکمه منوی اصلی را بزن.",tok);
+            return;
+        }
+        if((text.equals("/footballiran") || text.startsWith("/footballiran@") ||
+            text.equals("/footballnow") || text.startsWith("/footballnow@") ||
+            text.equals("/footballstatus") || text.startsWith("/footballstatus@")) &&
+            !canUseMenuFeatures(user)) {
+            sendText(chat,accessMessage(user),tok);
+            return;
+        }
         if (text.equals("/privacy") || text.startsWith("/privacy@")) {
             sendText(chat, "🔒 شفافیت گزارش دانلود Downloaderjavid" +
                 "\nبرای مدیریت بات، شناسه و نام نمایشی تلگرام، عنوان فایل، " +
@@ -732,7 +794,7 @@ public final class TelegramBotService extends Service {
         }
         // Private digest is opt-in, and only an already approved member
         // can subscribe. Channel publication is configured separately by owner.
-        if ((text.equals("/footballiran") || text.startsWith("/footballiran@")) && isOwner(user)) {
+        if ((text.equals("/footballiran") || text.startsWith("/footballiran@")) && canUseMenuFeatures(user)) {
             sendText(chat,"⏳ در حال بررسی اختصاصی لیگ برتر ایران و گل‌زن‌ها...",tok);
             digestExecutor.execute(() -> {
                 try {
@@ -745,7 +807,7 @@ public final class TelegramBotService extends Service {
             });
             return;
         }
-        if ((text.equals("/footballnow") || text.startsWith("/footballnow@")) && isOwner(user)) {
+        if ((text.equals("/footballnow") || text.startsWith("/footballnow@")) && canUseMenuFeatures(user)) {
             sendText(chat,"⏳ در حال بررسی نتایج مهم اروپا و ایران از چند منبع...",tok);
             digestExecutor.execute(() -> {
                 try {
@@ -758,7 +820,7 @@ public final class TelegramBotService extends Service {
             });
             return;
         }
-        if ((text.equals("/footballstatus") || text.startsWith("/footballstatus@")) && isOwner(user)) {
+        if ((text.equals("/footballstatus") || text.startsWith("/footballstatus@")) && canUseMenuFeatures(user)) {
             sendText(chat,"⚽ وضعیت منبع فوتبال\n" +
                 preferences().getString(FootballLiveTracker.LAST_STATUS,
                     "هنوز پایش نشده") +
@@ -883,11 +945,11 @@ public final class TelegramBotService extends Service {
                 "\nاین پاسخ از موتور جدید اندروید است. بات قدیمی نباید هم‌زمان فعال باشد.", tok);
             return;
         }
-        if (text.startsWith("/start") || text.startsWith("/help")) {
-            sendText(chat, "سلام 👋\nلینک ویدیوی عمومی و مجاز را بفرست، حق دانلود را تأیید کن و ویدیو یا MP3 را انتخاب کن.\n"
-                    + "/status: وضعیت بات\n/profile: حساب و سهمیه" +
-                    "\n/privacy: نحوه ثبت تاریخچه\n/forgetmyhistory: حذف گزارش جزئی خود" +
-                    "\n/digesthelp: نتایج فوتبال و هشدار بارندگی، بدون اخبار", tok);
+        if(text.startsWith("/help")) {
+            sendText(chat,"📖 /menu برای نمایش منوی دکمه‌ای"+
+                "\n/profile وضعیت حساب | /footballiran فوتبال ایران"+
+                "\n/footballnow فوتبال جهان | /digestjoin عضویت اعلان‌ها"+
+                "\n/digestleave قطع اعلان‌ها | /privacy حریم خصوصی",mainMenu(),tok);
             return;
         }
         if (text.startsWith("/status")) {
@@ -934,6 +996,29 @@ public final class TelegramBotService extends Service {
         }
         String id = UUID.randomUUID().toString().substring(0, 12);
         pending.put(id, new PendingDownload(user, url));
+        String preferred=nextLinkFormat.remove(user);
+        if("v".equals(preferred)) {
+            JSONObject qualities=keyboard(
+                new JSONArray()
+                    .put(new JSONObject().put("text","1080p").put("callback_data","quality:"+id+":1080"))
+                    .put(new JSONObject().put("text","720p").put("callback_data","quality:"+id+":720"))
+                    .put(new JSONObject().put("text","480p").put("callback_data","quality:"+id+":480")),
+                new JSONArray().put(new JSONObject().put("text","360p")
+                    .put("callback_data","quality:"+id+":360")),
+                new JSONArray().put(new JSONObject().put("text","❌ لغو")
+                    .put("callback_data","cancel:"+id)));
+            sendText(chat,"🎬 "+source+"\nکیفیت ویدیو را انتخاب کن:",qualities,tok);
+            return;
+        }
+        if("a".equals(preferred)) {
+            JSONObject audio=keyboard(
+                new JSONArray().put(new JSONObject().put("text","🎵 تأیید MP3")
+                    .put("callback_data","fmt:"+id+":a")),
+                new JSONArray().put(new JSONObject().put("text","❌ لغو")
+                    .put("callback_data","cancel:"+id)));
+            sendText(chat,"🎵 "+source+"\nدانلود MP3 را تأیید کن:",audio,tok);
+            return;
+        }
         JSONObject formats = keyboard(
             new JSONArray()
                 .put(new JSONObject().put("text", "🎬 ویدیو").put("callback_data", "fmt:" + id + ":v"))
@@ -945,6 +1030,47 @@ public final class TelegramBotService extends Service {
         sendText(chat, "📎 " + source + "\nچه فرمتی می‌خواهی؟", formats, tok);
     }
 
+    private static JSONArray row(String... labels) {
+        JSONArray array=new JSONArray();
+        for(String title:labels)array.put(title);
+        return array;
+    }
+    private static JSONObject replyMenu(JSONArray... rows) throws Exception {
+        JSONArray keys=new JSONArray();
+        for(JSONArray line:rows)keys.put(line);
+        return new JSONObject().put("keyboard",keys)
+            .put("resize_keyboard",true).put("is_persistent",true)
+            .put("one_time_keyboard",false)
+            .put("input_field_placeholder","یک گزینه انتخاب کن");
+    }
+    private static JSONObject mainMenu() throws Exception {
+        return replyMenu(
+            row("🇮🇷 فوتبال ایران","🌍 فوتبال جهان"),
+            row("⬇️ دانلود ویدیو","🎵 دانلود MP3"),
+            row("🔔 اعلان‌ها","👤 حساب من"),
+            row("⚙️ تنظیمات","❓ راهنما"));
+    }
+    private static JSONObject alertsMenu() throws Exception {
+        return replyMenu(
+            row("✅ عضویت اعلان‌ها","🔕 قطع اعلان‌ها"),
+            row("ℹ️ راهنمای اعلان‌ها"),row("🏠 منوی اصلی"));
+    }
+    private static JSONObject settingsMenu() throws Exception {
+        return replyMenu(
+            row("📋 وضعیت بات","🔒 حریم خصوصی"),
+            row("📊 سلامت منابع فوتبال","🏠 منوی اصلی"));
+    }
+    private void welcomeMenu(long user,long chat,String token) throws Exception {
+        if(!canUseMenuFeatures(user)) {
+            sendText(chat,"👋 خوش آمدی! حساب هنوز توسط مدیر تأیید نشده است."+
+                "\nبعد از تأیید، بخش‌های فوتبال و دانلود فعال می‌شوند.",mainMenu(),token);
+            return;
+        }
+        sendText(chat,"🤖 Javid Downloader 2.2.0\n"+
+            "از دکمه‌های زیر استفاده کن؛ دیگر لازم نیست دستوری حفظ کنی."+
+            "\n⚽ فوتبال ایران و جهان | ⬇️ دانلود | 🔔 مدیریت اعلان‌ها",
+            mainMenu(),token);
+    }
     private static JSONObject keyboard(JSONArray... rows) throws Exception {
         JSONArray all = new JSONArray();
         for (JSONArray row : rows) all.put(row);
