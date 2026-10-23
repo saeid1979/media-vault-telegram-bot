@@ -36,7 +36,8 @@ final class FootballLiveTracker {
     FootballLiveTracker(SharedPreferences prefs) { this.prefs = prefs; }
 
     static final class Match {
-        String id, home, away, league, source, clock = "";
+        String id, home, away, league, source, clock = "", scorers = "";
+        boolean iran;
         int h = -1, a = -1, importance = 2;
         long kickoff;
         boolean live, finished;
@@ -46,7 +47,8 @@ final class FootballLiveTracker {
         String line() {
             return (live ? "🔴 " : finished ? "✅ " : "🕒 ") +
                 league + " | " + home + " " + score() + " " + away +
-                (clock.isEmpty() ? live ? " (زنده)" : finished ? " (پایان)" : "" : " (" + clock + ")");
+                (clock.isEmpty() ? live ? " (زنده)" : finished ? " (پایان)" : "" : " (" + clock + ")") +
+                (scorers.isEmpty() ? "" : "\n  ⚽ " + scorers);
         }
         String sourceLine() { return "منبع: " + source; }
     }
@@ -54,10 +56,15 @@ final class FootballLiveTracker {
         final List<Match> games = new ArrayList<>();
         int sourcesOk, sourcesFailed;
         boolean iranCovered;
+        int iranFeedsOk, iranFeedsFailed;
+        int iranMatches;
+        String iranError = "";
         String diagnostics() {
             return "منابع پاسخگو: " + sourcesOk + "، ناموفق: " +
                 sourcesFailed + "، بازی‌های مهم: " + games.size() +
-                "، پوشش ایران: " + (iranCovered ? "دریافت شد" : "نامشخص");
+                "، لیگ ایران: " + iranMatches + " بازی" +
+                "، منابع ایران: " + iranFeedsOk + " پاسخگو / " + iranFeedsFailed + " ناموفق" +
+                (iranError.isEmpty() ? "" : "، آخرین خطا: " + iranError);
         }
     }
 
@@ -105,7 +112,8 @@ final class FootballLiveTracker {
     }
     private static boolean recent(Match match, long now) {
         // Avoid stale historic season events; only a 40-hour window, or ongoing live games.
-        return match.live || (match.kickoff > now - TimeUnit.HOURS.toMillis(40) &&
+        return match.live || (match.kickoff > now - TimeUnit.HOURS.toMillis(
+                match.iran ? 24 * 7 : 40) &&
             match.kickoff < now + TimeUnit.HOURS.toMillis(8));
     }
     private static String[] ESPN = {
@@ -182,7 +190,8 @@ final class FootballLiveTracker {
         String region = category==null?"":category.optString("slug","").toLowerCase(Locale.ROOT);
         String name = (unique!=null?unique.optString("name",""):tournament.optString("name",""))
             .toLowerCase(Locale.ROOT);
-        if ("iran".equals(country) || "iran".equals(region)) return true;
+        if ("iran".equals(country) || "iran".equals(region) ||
+            (unique != null && unique.optInt("id", -1) == 915)) return true;
         if (name.contains("champions league") || name.contains("europa league") ||
             name.contains("world cup") || name.contains("afc champions") ||
             name.contains("copa america") || name.contains("libertadores")) return true;
@@ -202,7 +211,9 @@ final class FootballLiveTracker {
         String country=category==null?"":category.optString("name","");
         String name = unique==null?tournament.optString("name",""):
             unique.optString("name", tournament.optString("name",""));
-        return text(("Iran".equalsIgnoreCase(country) ? "ایران · " : "") + name,58);
+        boolean iran = "Iran".equalsIgnoreCase(country) ||
+            (unique != null && unique.optInt("id", -1) == 915);
+        return text((iran ? "ایران · " : "") + name,58);
     }
     private static int sofaScore(JSONObject teamScore) {
         if (teamScore == null) return -1;
@@ -236,7 +247,8 @@ final class FootballLiveTracker {
             m.source="Sofascore";
             m.live=live;m.finished=ended;
             m.kickoff=1000L*event.optLong("startTimestamp",0);
-            m.importance=m.league.contains("ایران")?0:1;
+            m.iran=m.league.contains("ایران");
+            m.importance=m.iran?0:1;
             // Provider sometimes returns the full clock in 'description'. Do not
             // guess a minute when it instead returns '1st half', 'HT', etc.
             if(live && status!=null) {
@@ -246,7 +258,7 @@ final class FootballLiveTracker {
             }
             if(m.h>=0&&m.a>=0&&!m.home.isEmpty()&&!m.away.isEmpty()&&recent(m,now))
                 found.put(m.id,m);
-            if(m.league.contains("ایران"))snapshot.iranCovered=true;
+            if(m.iran) { snapshot.iranCovered=true; snapshot.iranMatches++; }
         }
     }
     private static void fromFotmob(JSONObject response, Map<String,Match> found,long now,
@@ -291,12 +303,151 @@ final class FootballLiveTracker {
                 m.source="FotMob";
                 m.live=live;m.finished=ended;
                 m.kickoff=parseInstant(status.optString("utcTime",""));
-                m.clock=live?text(status.optString("reason",""),14):"";
+                if(m.kickoff==0) m.kickoff=e.optLong("timeTS",0);
+                if(live) {
+                    JSONObject time=status.optJSONObject("liveTime");
+                    m.clock=time==null?"":text(time.optString("short",""),15);
+                    if(m.clock.isEmpty()) {
+                        JSONObject reason=status.optJSONObject("reason");
+                        m.clock=reason==null?"":text(reason.optString("short",""),15);
+                    }
+                }
                 m.importance=iran?0:1;
+                m.iran=iran;
                 if(m.h>=0&&m.a>=0&&!m.home.isEmpty()&&!m.away.isEmpty()&&recent(m,now))
                     found.put(m.id,m);
-                if(iran)snapshot.iranCovered=true;
+                if(iran) { snapshot.iranCovered=true; snapshot.iranMatches++; }
             }
+        }
+    }
+
+    private static final String SOFA_IRAN = "https://api.sofascore.com/api/v1";
+    private static final String FOTMOB_IRAN = "https://www.fotmob.com/api/data";
+    private static int iranUniqueTournamentId = 915; // Persian Gulf Pro League
+
+    private static String sourceError(Exception e) {
+        if (e.getMessage() != null && e.getMessage().contains("HTTP "))
+            return text(e.getMessage(), 90);
+        return e.getClass().getSimpleName();
+    }
+
+    /** League-specific data source: avoids dropping Iran from huge global schedules. */
+    private static void iranSeasonResults(Snapshot snap, Map<String,Match> matches, long now) {
+        try {
+            JSONObject seasons=getJson(SOFA_IRAN+
+                "/unique-tournament/"+iranUniqueTournamentId+"/seasons",300_000);
+            JSONArray seasonsList=seasons.optJSONArray("seasons");
+            if(seasonsList==null || seasonsList.length()==0)
+                throw new IllegalStateException("No active Iran season");
+            int season=seasonsList.getJSONObject(0).optInt("id",0);
+            if(season<=0)throw new IllegalStateException("Invalid Iran season");
+            JSONObject results=getJson(SOFA_IRAN+
+                "/unique-tournament/915/season/"+season+"/events/last/0",500_000);
+            snap.iranFeedsOk++;
+            snap.sourcesOk++;
+            fromSofa(results,matches,now,snap);
+        }catch(Exception failure){
+            snap.iranFeedsFailed++;
+            snap.iranError="Sofascore "+sourceError(failure);
+        }
+    }
+
+    /** The /api/matches URL used by old versions was moved to /api/data/matches. */
+    private static void iranDailyFotmob(Snapshot snap,Map<String,Match> matches,long now) {
+        java.time.LocalDate today=LocalDate.now(ZoneId.of("Asia/Tehran"));
+        // One live date and the 3 preceding Iranian local days.
+        // Show latest Iranian results even when no game is played today.
+        for(int ago=0;ago<4;ago++) {
+            String date=today.minusDays(ago).format(DateTimeFormatter.BASIC_ISO_DATE);
+            try {
+                JSONObject result=getJson(FOTMOB_IRAN+
+                    "/matches?date="+date+"&ccode3=IRN",6_000_000);
+                snap.iranFeedsOk++;
+                snap.sourcesOk++;
+                fromFotmob(result,matches,now,snap);
+            }catch(Exception failure) {
+                snap.iranFeedsFailed++;
+                snap.iranError="FotMob "+sourceError(failure);
+            }
+            // Avoid excessive calls after collecting at least one recent match
+            // if additional days would no longer improve live goal alerts.
+            if(ago>=1 && snap.iranCovered)break;
+        }
+    }
+
+    private static String sofaGoals(String id) {
+        JSONObject result;
+        try {
+            result=getJson(SOFA_IRAN+"/event/"+id+"/incidents",220_000);
+        }catch(Exception blocked){return "";}
+        JSONArray incidents=result.optJSONArray("incidents");
+        if(incidents==null)return "";
+        List<String> goals=new ArrayList<>();
+        for(int i=0;i<incidents.length();i++) {
+            JSONObject item=incidents.optJSONObject(i);
+            if(item==null || !"goal".equalsIgnoreCase(item.optString("incidentType","")))continue;
+            JSONObject player=item.optJSONObject("player");
+            String scorer=player==null?"":text(player.optString("name",""),34);
+            if(scorer.isEmpty())continue;
+            int minute=item.optInt("time",-1);
+            int injury=item.optInt("addedTime",0);
+            String stamp=minute>0 && minute<=130 ?
+                " "+minute+(injury>0?"+"+injury:"")+"′" : "";
+            String side=item.optBoolean("isHome",false)?"میزبان":"میهمان";
+            goals.add(scorer+stamp+" ("+side+")");
+        }
+        return compactGoals(goals);
+    }
+    private static String fotmobGoals(String id) {
+        try {
+            JSONObject data=getJson(FOTMOB_IRAN+"/matchDetails?matchId="+id,1_200_000);
+            JSONObject content=data.optJSONObject("content");
+            JSONObject facts=content==null?null:content.optJSONObject("matchFacts");
+            JSONObject events=facts==null?null:facts.optJSONObject("events");
+            JSONArray items=events==null?null:events.optJSONArray("events");
+            if(items==null) {
+                JSONObject header=data.optJSONObject("header");
+                items=header==null?null:header.optJSONArray("events");
+            }
+            if(items==null)return "";
+            List<String> goals=new ArrayList<>();
+            for(int i=0;i<items.length();i++){
+                JSONObject goal=items.optJSONObject(i);
+                if(goal==null || !"goal".equalsIgnoreCase(goal.optString("type","")))continue;
+                JSONObject player=goal.optJSONObject("player");
+                String name=player==null?"":player.optString("name","");
+                if(name.isEmpty())name=goal.optString("nameStr","");
+                name=text(name,34);
+                if(name.isEmpty())continue;
+                String stamp=text(goal.optString("timeStr",""),10);
+                if(stamp.isEmpty()) {
+                    int time=goal.optInt("time",0);
+                    if(time>0 && time<=130)stamp=time+"′";
+                }
+                goals.add(name+(stamp.isEmpty()?"":" "+stamp)+
+                    (goal.optBoolean("isHome",false)?" (میزبان)":" (میهمان)"));
+            }
+            return compactGoals(goals);
+        }catch(Exception unavailable){return "";}
+    }
+    private static String compactGoals(List<String> goals) {
+        if(goals.isEmpty())return "";
+        StringBuilder out=new StringBuilder();
+        for(String g:goals){
+            if(out.length()+g.length()>220)break;
+            if(out.length()>0)out.append("، ");
+            out.append(g);
+        }
+        return out.toString();
+    }
+    private static void enrichIranGoals(Snapshot snap) {
+        int enriched=0;
+        for(Match match:snap.games) {
+            if(!match.iran || match.h+match.a==0 || match.h<0 || match.a<0)continue;
+            if(enriched>=4)break;
+            enriched++;
+            if(match.id.startsWith("sofa:"))match.scorers=sofaGoals(match.id.substring(5));
+            else if(match.id.startsWith("fotmob:"))match.scorers=fotmobGoals(match.id.substring(7));
         }
     }
 
