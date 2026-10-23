@@ -64,7 +64,7 @@ public final class TelegramBotService extends Service {
     public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.2.0 · Persian Telegram interactive menus";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.3.0 · personalized favorite-team football alerts";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -228,6 +228,7 @@ public final class TelegramBotService extends Service {
         networkWatcher = null;
     }
     private BotUserStore userStore;
+    private TeamFavoritesStore favoriteStore;
     private BotStatsStore botStats;
     private BotDownloadLogStore audit;
     private HourlyDigestPublisher digests;
@@ -299,9 +300,10 @@ public final class TelegramBotService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         userStore = new BotUserStore(this);
+        favoriteStore = new TeamFavoritesStore(this);
         botStats = new BotStatsStore(this);
         audit = new BotDownloadLogStore(this);
-        digests = new HourlyDigestPublisher(this, preferences(), userStore);
+        digests = new HourlyDigestPublisher(this, preferences(), userStore, favoriteStore);
         football = new FootballLiveTracker(preferences());
         rainAlerts = new RainAlerts(preferences());
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -374,10 +376,10 @@ public final class TelegramBotService extends Service {
                 preferences().edit().putBoolean("football_was_live",live).apply();
                 if(!update.alerts.isEmpty()) {
                     String secret=token();
-                    for(String alert:update.alerts) {
+                    for(FootballLiveTracker.FootballAlert alert:update.footballAlerts) {
                         if(!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
                             break;
-                        digests.sendAlert(secret,alert);
+                        digests.sendFootballAlert(secret,alert);
                     }
                 }
             }catch(Exception ignored){
@@ -433,6 +435,7 @@ public final class TelegramBotService extends Service {
         preferences().edit().putLong("service_heartbeat", 0L).apply();
         if (audit != null) audit.close();
         if (botStats != null) botStats.close();
+        if (favoriteStore != null) favoriteStore.close();
         if (userStore != null) userStore.close();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
         preferences().edit().putBoolean("enabled", false).putInt("current_downloads", 0).apply();
@@ -521,7 +524,7 @@ public final class TelegramBotService extends Service {
                         }
                     }
                     errors = 0;
-                    status("✅ متصل به @" + username + " · v2.2.0 · بات فعال است");
+                    status("✅ متصل به @" + username + " · v2.3.0 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
                     errors++;
@@ -1046,14 +1049,16 @@ public final class TelegramBotService extends Service {
     private static JSONObject mainMenu() throws Exception {
         return replyMenu(
             row("🇮🇷 فوتبال ایران","🌍 فوتبال جهان"),
+            row("⭐ تیم‌های محبوب","🔔 اعلان‌ها"),
             row("⬇️ دانلود ویدیو","🎵 دانلود MP3"),
-            row("🔔 اعلان‌ها","👤 حساب من"),
-            row("⚙️ تنظیمات","❓ راهنما"));
+            row("👤 حساب من","⚙️ تنظیمات"),
+            row("❓ راهنما"));
     }
     private static JSONObject alertsMenu() throws Exception {
         return replyMenu(
             row("✅ عضویت اعلان‌ها","🔕 قطع اعلان‌ها"),
-            row("ℹ️ راهنمای اعلان‌ها"),row("🏠 منوی اصلی"));
+            row("⭐ تیم‌های محبوب","ℹ️ راهنمای اعلان‌ها"),
+            row("🏠 منوی اصلی"));
     }
     private static JSONObject settingsMenu() throws Exception {
         return replyMenu(
@@ -1066,7 +1071,7 @@ public final class TelegramBotService extends Service {
                 "\nبعد از تأیید، بخش‌های فوتبال و دانلود فعال می‌شوند.",mainMenu(),token);
             return;
         }
-        sendText(chat,"🤖 Javid Downloader 2.2.0\n"+
+        sendText(chat,"🤖 Javid Downloader 2.3.0\n"+
             "از دکمه‌های زیر استفاده کن؛ دیگر لازم نیست دستوری حفظ کنی."+
             "\n⚽ فوتبال ایران و جهان | ⬇️ دانلود | 🔔 مدیریت اعلان‌ها",
             mainMenu(),token);
