@@ -1306,6 +1306,142 @@ public final class TelegramBotService extends Service {
             sendText(chat,"سرویس موقتاً متوقف شده است.",tok);
         }
     }
+    private static JSONObject weatherButton(WeatherCityStore.City c,boolean selected)
+        throws Exception {
+        return new JSONObject().put("text",(selected?"✅ ":"➕ ")+c.name)
+            .put("callback_data","wx:toggle:"+c.id);
+    }
+    private JSONObject weatherKeyboard(long user,String page) throws Exception {
+        java.util.Set<String> selected=weatherStore.selected(user);
+        java.util.List<JSONArray> rows=new java.util.ArrayList<>();
+        if("spain".equals(page) || "iran".equals(page)) {
+            for(WeatherCityStore.City city:WeatherCityStore.PRESETS){
+                boolean spanish=city.zone.equals("Europe/Madrid");
+                if(("spain".equals(page) != spanish))continue;
+                rows.add(new JSONArray().put(weatherButton(city,selected.contains(city.id))));
+            }
+        }else {
+            for(String id:selected) {
+                WeatherCityStore.City city=weatherStore.get(id);
+                if(city!=null)rows.add(new JSONArray().put(weatherButton(city,true)));
+            }
+        }
+        rows.add(new JSONArray()
+            .put(new JSONObject().put("text","🇪🇸 شهرهای اسپانیا")
+                .put("callback_data","wx:page:spain"))
+            .put(new JSONObject().put("text","🇮🇷 شهرهای ایران")
+                .put("callback_data","wx:page:iran")));
+        rows.add(new JSONArray()
+            .put(new JSONObject().put("text","📋 شهرهای انتخاب‌شده")
+                .put("callback_data","wx:page:my"))
+            .put(new JSONObject().put("text","🔎 جستجوی شهر دلخواه")
+                .put("callback_data","wx:search")));
+        rows.add(new JSONArray().put(new JSONObject()
+            .put("text","🌤 وضعیت آب‌وهوای شهرهای من")
+            .put("callback_data","wx:now")));
+        return keyboard(rows.toArray(new JSONArray[0]));
+    }
+    private String weatherText(long user,String page,String notice){
+        StringBuilder out=new StringBuilder("🌧 آب‌وهوای شخصی شما — 2.5.0\n");
+        if(notice!=null&&!notice.isEmpty())out.append(notice).append("\n\n");
+        java.util.Set<String> chosen=weatherStore.selected(user);
+        out.append("شهرهای انتخاب‌شده: ").append(chosen.size()).append(" از ۳\n");
+        if(chosen.isEmpty())out.append("🔕 شهری انتخاب نشده است.\n");
+        else for(String id:chosen){
+            WeatherCityStore.City city=weatherStore.get(id);
+            if(city!=null)out.append("📍 ").append(city.name).append("\n");
+        }
+        out.append("\n☔ هشدار شروع بارندگی و احتمال بارندگی تا دو ساعت آینده");
+        out.append("\n🔔 پیام خصوصی تنها با عضویت /digestjoin و روشن بودن خبرنامه فعال است.");
+        out.append("\n\n");
+        out.append("iran".equals(page)?"🇮🇷 شهرهای ایران:":
+            "spain".equals(page)?"🇪🇸 شهرهای اسپانیا:":"📋 شهرهای فعلی:");
+        out.append("\nبرای انتخاب یا حذف روی نام شهر بزن.");
+        out.append("\nبرای شهرهای دیگر از «جستجوی شهر دلخواه» استفاده کن.");
+        return out.toString();
+    }
+    private void showWeather(long user,long chat,String tok,String page,
+                             int messageId,String notice) throws Exception {
+        String response=weatherText(user,page,notice);
+        JSONObject keyboard=weatherKeyboard(user,page);
+        if(messageId>0){
+            try{
+                editText(chat,messageId,response,keyboard,tok);
+                return;
+            }catch(Exception ignored){}
+        }
+        sendText(chat,response,keyboard,tok);
+    }
+    private void searchWeatherCity(long user,long chat,String tok,String entered)
+        throws Exception {
+        if(!canUseMenuFeatures(user)){
+            sendText(chat,accessMessage(user),tok);return;
+        }
+        String query=entered==null?"":entered.trim();
+        if(!query.matches("[\\p{L}\\p{M}\\p{N} .'-]{2,48}")){
+            sendText(chat,"⚠️ نام شهر معتبر نیست. مثل: /weathersearch Porto",tok);
+            return;
+        }
+        try {
+            weatherQueries.execute(()->{
+                try {
+                    java.util.List<WeatherCityStore.City> hits=WeatherCityStore.search(query);
+                    if(hits.isEmpty()) {
+                        sendText(chat,"شهری پیدا نشد. نام شهر را به انگلیسی هم امتحان کن.",tok);
+                        return;
+                    }
+                    JSONArray choices=new JSONArray();
+                    for(WeatherCityStore.City city:hits){
+                        String token=java.util.UUID.randomUUID().toString()
+                            .replace("-","").substring(0,12);
+                        if(pendingCityResults.size()>300)pendingCityResults.clear();
+                        pendingCityResults.put(token,new PendingCity(user,city));
+                        choices.put(new JSONArray().put(new JSONObject()
+                            .put("text","📍 "+city.name)
+                            .put("callback_data","wx:add:"+token)));
+                    }
+                    JSONArray[] rows=new JSONArray[choices.length()];
+                    for(int k=0;k<choices.length();k++)rows[k]=choices.getJSONArray(k);
+                    sendText(chat,"🔎 نتایج جستجو برای «"+query+"»\n"+
+                        "شهر مورد نظرت را انتخاب کن:",keyboard(rows),tok);
+                }catch(Exception failure){
+                    try{sendText(chat,"⚠️ جستجوی شهر موقتاً در دسترس نیست. "+
+                        "نام را بررسی کن و دوباره امتحان کن.",tok);
+                    }catch(Exception ignored){}
+                }
+            });
+        }catch(java.util.concurrent.RejectedExecutionException shutdown) {
+            sendText(chat,"سرویس هواشناسی در حال راه‌اندازی مجدد است.",tok);
+        }
+    }
+    private void currentUserWeather(long user,long chat,String tok) throws Exception {
+        if(!canUseMenuFeatures(user)) {sendText(chat,accessMessage(user),tok);return;}
+        try{
+            weatherQueries.execute(()->{
+                try{
+                    java.util.List<WeatherCityStore.City> cities=new java.util.ArrayList<>();
+                    for(String id:weatherStore.selected(user)) {
+                        WeatherCityStore.City found=weatherStore.get(id);
+                        if(found!=null)cities.add(found);
+                    }
+                    if(cities.isEmpty()){
+                        sendText(chat,"ابتدا یک شهر انتخاب کن: /weather",tok);return;
+                    }
+                    RainAlerts.Report status=rainAlerts.check(false,cities);
+                    StringBuilder msg=new StringBuilder("🌤 وضعیت فعلی شهرهای شما\n");
+                    for(String line:status.observations)
+                        msg.append("\n• ").append(line);
+                    msg.append("\n🔎 منبع: Open-Meteo (برآورد و پیش‌بینی)");
+                    sendText(chat,msg.toString(),tok);
+                }catch(Exception fail){
+                    try{sendText(chat,"⚠️ دریافت آب‌وهوای شهرها ناموفق بود.",tok);
+                    }catch(Exception ignored){}
+                }
+            });
+        }catch(java.util.concurrent.RejectedExecutionException stop){
+            sendText(chat,"سرویس آب‌وهوا در حال راه‌اندازی مجدد است.",tok);
+        }
+    }
     private static JSONObject keyboard(JSONArray... rows) throws Exception {
         JSONArray all = new JSONArray();
         for (JSONArray row : rows) all.put(row);
