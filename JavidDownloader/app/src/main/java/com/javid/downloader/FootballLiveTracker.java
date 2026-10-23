@@ -616,9 +616,17 @@ final class FootballLiveTracker {
         String[] goals=all.split("، ");
         return "⚽ گل‌زن گزارش‌شده: " + goals[goals.length-1];
     }
+    static final class FootballAlert {
+        final Match match;
+        final String text;
+        FootballAlert(Match match,String text) {
+            this.match=match;this.text=text;
+        }
+    }
     static final class Update {
         Snapshot snapshot;
-        final List<String> alerts=new ArrayList<>();
+        final List<String> alerts=new ArrayList<>(); // compatibility with 2.2 diagnostics
+        final List<FootballAlert> footballAlerts=new ArrayList<>();
     }
     Update check() {
         Update out=new Update();
@@ -638,13 +646,20 @@ final class FootballLiveTracker {
                     boolean done=old.optBoolean("finished",false);
                     if(m.live && ((h>=0&&m.h>h)||(a>=0&&m.a>a))) {
                         String scorer=goalScorer(m);
-                        out.alerts.add("⚽ گل در مسابقه مهم!\n"+m.line()+
-                            (scorer.isEmpty()?"":"\n"+scorer)+"\nمنبع: "+m.source);
+                        String message="⚽ گل در مسابقه مهم!\n"+m.line()+
+                            (scorer.isEmpty()?"":"\n"+scorer)+"\nمنبع: "+m.source;
+                        out.alerts.add(message);
+                        out.footballAlerts.add(new FootballAlert(m,message));
                     } else if(m.live && h>=0 && a>=0 && (m.h<h||m.a<a)) {
-                        out.alerts.add("📌 نتیجه اصلاح شد (احتمال بازبینی گل):\n"+m.line()+
-                            "\nمنبع: "+m.source);
+                        String message="📌 نتیجه اصلاح شد (احتمال بازبینی گل):\n"+
+                            m.line()+"\nمنبع: "+m.source;
+                        out.alerts.add(message);
+                        out.footballAlerts.add(new FootballAlert(m,message));
                     } else if(m.finished && !done && wasLive) {
-                        out.alerts.add("🏁 پایان بازی:\n"+m.line()+"\nمنبع: "+m.source);
+                        String message="🏁 پایان بازی:\n"+m.line()+
+                            "\nمنبع: "+m.source;
+                        out.alerts.add(message);
+                        out.footballAlerts.add(new FootballAlert(m,message));
                     }
                 }
                 next.put(key(m),stateEntry(m));
@@ -663,6 +678,8 @@ final class FootballLiveTracker {
         prefs.edit().putString(STATE,next.toString()).apply();
         // Avoid a huge storm after reconnection.
         while(out.alerts.size()>8)out.alerts.remove(out.alerts.size()-1);
+        while(out.footballAlerts.size()>8)
+            out.footballAlerts.remove(out.footballAlerts.size()-1);
         return out;
     }
 }
