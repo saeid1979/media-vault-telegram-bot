@@ -33,9 +33,11 @@ final class HourlyDigestPublisher {
     private final SharedPreferences prefs;
     private final BotUserStore users;
     private final TeamFavoritesStore favorites;
+    private final WeatherCityStore weatherCities;
     HourlyDigestPublisher(Context context, SharedPreferences prefs, BotUserStore users,
-                          TeamFavoritesStore favorites) {
+                          TeamFavoritesStore favorites, WeatherCityStore weatherCities) {
         this.prefs=prefs;this.users=users;this.favorites=favorites;
+        this.weatherCities=weatherCities;
     }
     static boolean channelValid(String chat) {
         return chat!=null && (chat.matches("@[A-Za-z][A-Za-z0-9_]{4,31}") ||
@@ -203,6 +205,42 @@ final class HourlyDigestPublisher {
                     "خطای ارسال خبرنامه" : "تیم محبوبی در نتایج این ساعت نبود").apply();
         }
         return result;
+    }
+
+    /** City-specific alerts are private opt-in messages.
+     * The existing public channel still receives Salamanca and Ardabil only.
+     * A user with no customized cities retains those original two defaults.
+     */
+    Report sendRainEvent(String token,RainAlerts.RainEvent event) {
+        Report report=new Report();
+        report.content=event.text;
+        if(!prefs.getBoolean(ENABLED,false))return report;
+        String channel=prefs.getString(TARGET,"");
+        if(("salamanca".equals(event.city.id)||"ardabil".equals(event.city.id)) &&
+            channelValid(channel)) {
+            try{send(token,channel,event.text);report.channelSent++;}
+            catch(Exception ignored){report.failed++;}
+        }
+        for(BotUserStore.User candidate:users.digestRecipients()) {
+            if(Thread.currentThread().isInterrupted())break;
+            try {
+                BotUserStore.User current=users.find(candidate.id);
+                if(current==null || !current.active || current.blocked ||
+                    !current.digestSubscribed)continue;
+                if(!weatherCities.wants(current.id,event.city.id))continue;
+                send(token,String.valueOf(current.id),event.text);
+                report.privateSent++;
+            }catch(Exception ignored){report.failed++;}
+            try{Thread.sleep(210);}catch(InterruptedException interrupted){
+                Thread.currentThread().interrupt();break;
+            }
+        }
+        if(report.channelSent+report.privateSent>0)
+            prefs.edit().putLong(LAST_SENT,System.currentTimeMillis())
+                .putString(LAST_RESULT,report.status()).apply();
+        else if(report.failed>0)
+            prefs.edit().putString(LAST_RESULT,"ارسال هشدار آب‌وهوا ناموفق بود.").apply();
+        return report;
     }
 
     /** Live goal/final events are dispatched to the selected team subscribers
