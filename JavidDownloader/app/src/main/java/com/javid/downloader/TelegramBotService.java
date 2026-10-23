@@ -801,6 +801,8 @@ public final class TelegramBotService extends Service {
         if(text.equals("❓ راهنما")) {
             sendText(chat,"📖 راهنما\n"+
                 "⚽ فوتبال ایران و جهان: نتایج جدید\n"+
+                "📅 برنامه بازی‌ها: امروز، فردا و هفته آینده\n"+
+                "🏆 جدول لیگ‌ها: امتیاز و رده‌بندی تیم‌ها\n"+
                 "⬇️ ویدیو و 🎵 MP3: انتخاب کن، سپس لینک مجاز بفرست\n"+
                 "🔔 اعلان‌ها: عضویت یا توقف دریافت\n"+
                 "⭐ تیم‌های محبوب: انتخاب تیم و اعلان گل اختصاصی\n"+
@@ -1023,6 +1025,7 @@ public final class TelegramBotService extends Service {
                 "\n/profile وضعیت حساب | /footballiran فوتبال ایران"+
                 "\n/footballnow فوتبال جهان | /digestjoin عضویت اعلان‌ها"+
                 "\n/digestleave قطع اعلان‌ها | /myteams تیم‌های محبوب"+
+                "\n/fixtures برنامه مسابقات | /table جدول لیگ‌ها"+
                 "\n/privacy حریم خصوصی",mainMenu(),tok);
             return;
         }
