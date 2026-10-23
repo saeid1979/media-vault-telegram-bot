@@ -595,6 +595,33 @@ public final class TelegramBotService extends Service {
             long who = from.optLong("id");
             long chat = message.getJSONObject("chat").optLong("id");
             int promptId = message.optInt("message_id", 0);
+            String favoriteData=callback.optString("data","");
+            if(favoriteData.startsWith("fav:")) {
+                JSONObject chatObject=message.optJSONObject("chat");
+                if(chatObject==null || !"private".equals(chatObject.optString("type")))
+                    return;
+                if(!canUseMenuFeatures(who)) {
+                    sendText(chat,accessMessage(who),tok);
+                    return;
+                }
+                String[] parts=favoriteData.split(":");
+                String page="iran";
+                String feedback="";
+                if(parts.length==3 && "page".equals(parts[1])) {
+                    page="europe".equals(parts[2])?"europe":"iran";
+                } else if(parts.length==4 && "toggle".equals(parts[1])) {
+                    if(TeamFavoritesStore.get(parts[2])==null)return;
+                    page="europe".equals(parts[3])?"europe":"iran";
+                    feedback=favoriteStore.toggle(who,parts[2]);
+                } else if(parts.length==3 && "mode".equals(parts[1])) {
+                    if(!"all".equals(parts[2]) && !"only".equals(parts[2]))return;
+                    feedback=favoriteStore.setFavoritesOnly(who,"only".equals(parts[2]));
+                } else if(parts.length==2 && "status".equals(parts[1])) {
+                    feedback="فهرست شما به‌روز است.";
+                } else return;
+                showFavorites(who,chat,tok,page,promptId,feedback);
+                return;
+            }
             if (!canDownload(who)) {
                 sendText(chat, accessMessage(who), tok);
                 return;
@@ -730,11 +757,18 @@ public final class TelegramBotService extends Service {
             welcomeMenu(user,chat,tok);
             return;
         }
+        if(text.equals("⭐ تیم‌های محبوب") || text.equals("/myteams") ||
+            text.equals("/favoriteteams")) {
+            if(!canUseMenuFeatures(user))sendText(chat,accessMessage(user),tok);
+            else showFavorites(user,chat,tok,"iran",0,"");
+            return;
+        }
         if(text.equals("❓ راهنما")) {
             sendText(chat,"📖 راهنما\n"+
                 "⚽ فوتبال ایران و جهان: نتایج جدید\n"+
                 "⬇️ ویدیو و 🎵 MP3: انتخاب کن، سپس لینک مجاز بفرست\n"+
                 "🔔 اعلان‌ها: عضویت یا توقف دریافت\n"+
+                "⭐ تیم‌های محبوب: انتخاب تیم و اعلان گل اختصاصی\n"+
                 "👤 حساب من: بررسی سهمیه\n"+
                 "🏠 بازگشت به منوی اصلی",mainMenu(),tok);
             return;
@@ -856,7 +890,8 @@ public final class TelegramBotService extends Service {
                 (isOwner(user) ? "مدیریت:\n/digestto @ChannelName تنظیم کانال\n" +
                     "/digeston فعال‌سازی ساعتی\n/digestoff توقف انتشار\n" +
                     "/digestpreview پیش‌نمایش نتایج فوتبال\n/digestnow ارسال فوری\n/digeststatus وضعیت\n/footballnow نتایج جهان\n/footballiran لیگ برتر ایران و گل‌زن‌ها\n/footballstatus سلامت منابع" :
-                    "فقط نتایج فوتبال و هشدار بارندگی، بدون اخبار عمومی."), tok);
+                    "فقط نتایج فوتبال و هشدار بارندگی، بدون اخبار عمومی.\n"+
+                    "/myteams برای انتخاب تیم‌های محبوب"), tok);
             return;
         }
         if (text.startsWith("/digest") && isOwner(user)) {
@@ -952,7 +987,8 @@ public final class TelegramBotService extends Service {
             sendText(chat,"📖 /menu برای نمایش منوی دکمه‌ای"+
                 "\n/profile وضعیت حساب | /footballiran فوتبال ایران"+
                 "\n/footballnow فوتبال جهان | /digestjoin عضویت اعلان‌ها"+
-                "\n/digestleave قطع اعلان‌ها | /privacy حریم خصوصی",mainMenu(),tok);
+                "\n/digestleave قطع اعلان‌ها | /myteams تیم‌های محبوب"+
+                "\n/privacy حریم خصوصی",mainMenu(),tok);
             return;
         }
         if (text.startsWith("/status")) {
@@ -1075,6 +1111,74 @@ public final class TelegramBotService extends Service {
             "از دکمه‌های زیر استفاده کن؛ دیگر لازم نیست دستوری حفظ کنی."+
             "\n⚽ فوتبال ایران و جهان | ⬇️ دانلود | 🔔 مدیریت اعلان‌ها",
             mainMenu(),token);
+    }
+    private static JSONObject favoriteTeamButton(TeamFavoritesStore.Team team,boolean selected,
+                                                 String group) throws Exception {
+        return new JSONObject().put("text",(selected?"✅ ":"➕ ")+team.label)
+            .put("callback_data","fav:toggle:"+team.id+":"+group);
+    }
+    private JSONObject favoriteKeyboard(long user,String group) throws Exception {
+        String category="europe".equals(group)?"europe":"iran";
+        java.util.Set<String> selected=favoriteStore.ids(user);
+        java.util.List<TeamFavoritesStore.Team> teams=TeamFavoritesStore.teams(category);
+        java.util.List<JSONArray> rows=new java.util.ArrayList<>();
+        for(int i=0;i<teams.size();i+=2) {
+            JSONArray row=new JSONArray();
+            for(int j=i;j<Math.min(i+2,teams.size());j++) {
+                TeamFavoritesStore.Team team=teams.get(j);
+                row.put(favoriteTeamButton(team,selected.contains(team.id),category));
+            }
+            rows.add(row);
+        }
+        rows.add(new JSONArray()
+            .put(new JSONObject().put("text","🇮🇷 تیم‌های ایران")
+                .put("callback_data","fav:page:iran"))
+            .put(new JSONObject().put("text","🌍 تیم‌های اروپا")
+                .put("callback_data","fav:page:europe")));
+        rows.add(new JSONArray()
+            .put(new JSONObject().put("text",
+                favoriteStore.favoritesOnly(user)?"✅ فقط تیم‌های محبوب":"🔔 فقط تیم‌های محبوب")
+                .put("callback_data","fav:mode:only"))
+            .put(new JSONObject().put("text",
+                favoriteStore.favoritesOnly(user)?"🌍 همه مسابقات":"✅ همه مسابقات")
+                .put("callback_data","fav:mode:all")));
+        rows.add(new JSONArray().put(new JSONObject().put("text","📋 فهرست انتخاب‌ها")
+            .put("callback_data","fav:status")));
+        return keyboard(rows.toArray(new JSONArray[0]));
+    }
+    private String favoriteText(long user,String group,String notice) {
+        java.util.Set<String> ids=favoriteStore.ids(user);
+        StringBuilder output=new StringBuilder("⭐ تیم‌های محبوب شما — نسخه 2.3.0\n");
+        if(notice!=null && !notice.isEmpty())output.append(notice).append("\n\n");
+        output.append("⚽ تیم‌های انتخاب‌شده: ").append(ids.size()).append(" از ۸\n");
+        if(ids.isEmpty())output.append("هنوز تیمی انتخاب نکرده‌ای.\n");
+        else for(TeamFavoritesStore.Team t:TeamFavoritesStore.CATALOG)
+            if(ids.contains(t.id))output.append("• ").append(t.label).append("\n");
+        output.append("\n🔔 وضعیت اعلان فوتبال: ").append(
+            favoriteStore.favoritesOnly(user)?"فقط تیم‌های منتخب":"همه مسابقات مهم");
+        BotUserStore.User member=userStore.find(user);
+        boolean subscribed=member!=null && member.digestSubscribed && member.active &&
+            !member.blocked;
+        output.append("\n📨 دریافت خصوصی اعلان‌ها: ")
+            .append(subscribed?"فعال":"غیرفعال؛ برای فعال‌سازی /digestjoin");
+        output.append("\n\n").append("europe".equals(group)?
+            "🌍 تیم‌های اروپایی را انتخاب کن:":"🇮🇷 تیم‌های ایرانی را انتخاب کن:");
+        output.append("\nبا لمس دوباره یک تیم می‌توانی آن را حذف کنی.");
+        return output.toString();
+    }
+    private void showFavorites(long user,long chat,String tok,String group,
+                               int messageId,String notice) throws Exception {
+        String info=favoriteText(user,group,notice);
+        JSONObject menu=favoriteKeyboard(user,group);
+        if(messageId>0) {
+            try {
+                editText(chat,messageId,info,menu,tok);
+                return;
+            } catch(Exception ignored) {
+                // Telegram can reject editing an old/deleted message.
+            }
+        }
+        sendText(chat,info,menu,tok);
     }
     private static JSONObject keyboard(JSONArray... rows) throws Exception {
         JSONArray all = new JSONArray();
