@@ -64,7 +64,7 @@ public final class TelegramBotService extends Service {
     public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.1.1 · Persian Gulf Pro League scores and scorers";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.1.2 · expanded Iranian goal scorer coverage";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -516,7 +516,7 @@ public final class TelegramBotService extends Service {
                         }
                     }
                     errors = 0;
-                    status("✅ متصل به @" + username + " · v2.1.1 · بات فعال است");
+                    status("✅ متصل به @" + username + " · v2.1.2 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
                     errors++;
