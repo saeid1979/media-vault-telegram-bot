@@ -452,83 +452,103 @@ final class FootballLiveTracker {
     }
 
     Snapshot collect() {
-        Snapshot snapshot=new Snapshot();
-        Map<String,Match> matches=new HashMap<>();
-        long now=System.currentTimeMillis();
-        // Query the previous date too after midnight, preserving late matches.
-        String[] dates={
-            LocalDate.now(ZoneId.of("UTC")).format(DateTimeFormatter.BASIC_ISO_DATE),
-            LocalDate.now(ZoneId.of("UTC")).minusDays(1).format(DateTimeFormatter.BASIC_ISO_DATE)
-        };
-        for(String league:ESPN){
+        Snapshot snapshot = new Snapshot();
+        Map<String, Match> matches = new HashMap<>();
+        long now = System.currentTimeMillis();
+
+        // Iran sources come first so bad global ESPN response times never
+        // prevent loading the user's priority league.
+        iranDailyFotmob(snapshot,matches,now);
+        if(!snapshot.iranCovered || snapshot.iranMatches==0)
+            iranSeasonResults(snapshot,matches,now);
+
+        String date = LocalDate.now(ZoneId.of("UTC"))
+            .format(DateTimeFormatter.BASIC_ISO_DATE);
+        for(String league:ESPN) {
             try {
-                JSONObject response=getJson("https://site.api.espn.com/apis/site/v2/sports/soccer/"+
-                    league+"/scoreboard?dates="+dates[0]+"&limit=80",900_000);
+                JSONObject data=getJson("https://site.api.espn.com/apis/site/v2/sports/soccer/"+
+                    league+"/scoreboard?dates="+date+"&limit=80",900_000);
                 snapshot.sourcesOk++;
-                fromEspn(snapshot,league,response,matches,now);
-            } catch(Exception ignored){snapshot.sourcesFailed++;}
+                fromEspn(snapshot,league,data,matches,now);
+            }catch(Exception unavailable){snapshot.sourcesFailed++;}
         }
-        boolean sofaOk=false;
-        try {
-            String day=LocalDate.now(ZoneId.of("Asia/Tehran")).toString();
-            JSONObject response=getJson("https://www.sofascore.com/api/v1/sport/football/scheduled-events/"+
-                day,2_800_000);
-            sofaOk=true;snapshot.sourcesOk++;
-            fromSofa(response,matches,now,snapshot);
-        } catch(Exception ignored) {
+        // Sofa daily is only a limited fallback if the league-specific and
+        // FotMob routes failed; the global feed can be several megabytes.
+        if(!snapshot.iranCovered) {
             try {
-                String day=LocalDate.now(ZoneId.of("Asia/Tehran")).toString();
-                JSONObject response=getJson("https://api.sofascore.com/api/v1/sport/football/scheduled-events/"+
-                    day,2_800_000);
-                sofaOk=true;snapshot.sourcesOk++;
-                fromSofa(response,matches,now,snapshot);
-            }catch(Exception ignored2){snapshot.sourcesFailed++;}
-        }
-        if(!snapshot.iranCovered || snapshot.sourcesOk==0) {
-            try {
-                String day=LocalDate.now(ZoneId.of("Asia/Tehran"))
-                    .format(DateTimeFormatter.BASIC_ISO_DATE);
-                JSONObject response=getJson("https://www.fotmob.com/api/matches?date="+
-                    day+"&ccode3=IRN",1_500_000);
+                String local=LocalDate.now(ZoneId.of("Asia/Tehran")).toString();
+                JSONObject daily=getJson(SOFA_IRAN+
+                    "/sport/football/scheduled-events/"+local,6_000_000);
+                snapshot.iranFeedsOk++;
                 snapshot.sourcesOk++;
-                fromFotmob(response,matches,now,snapshot);
-            }catch(Exception ignored){snapshot.sourcesFailed++;}
-        }
-        // Supplement late-night matches from the prior UTC day if primary result
-        // is empty. One source only to keep mobile polling reasonably cheap.
-        if(matches.isEmpty() && snapshot.sourcesOk>0) {
-            try {
-                JSONObject response=getJson("https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates="+
-                    dates[1]+"&limit=120",1_400_000);
-                snapshot.sourcesOk++;
-                fromEspn(snapshot,"جهان",response,matches,now);
-            }catch(Exception ignored){snapshot.sourcesFailed++;}
+                fromSofa(daily,matches,now,snapshot);
+            }catch(Exception failure) {
+                snapshot.iranFeedsFailed++;
+                snapshot.iranError="Sofascore daily "+sourceError(failure);
+            }
         }
         snapshot.games.addAll(matches.values());
+        snapshot.iranMatches=0;
+        for(Match m:snapshot.games) if(m.iran)snapshot.iranMatches++;
+        snapshot.iranCovered=snapshot.iranMatches>0;
+
         snapshot.games.sort((a,b)->{
-            int v=Boolean.compare(b.live,a.live);
-            if(v!=0)return v;
-            v=Integer.compare(a.importance,b.importance);
-            if(v!=0)return v;
+            int importance=Boolean.compare(b.iran,a.iran);
+            if(importance!=0)return importance;
+            int live=Boolean.compare(b.live,a.live);
+            if(live!=0)return live;
+            int priority=Integer.compare(a.importance,b.importance);
+            if(priority!=0)return priority;
             return Long.compare(b.kickoff,a.kickoff);
         });
+        enrichIranGoals(snapshot);
         prefs.edit().putLong(LAST_CHECK,System.currentTimeMillis())
             .putString(LAST_STATUS,snapshot.diagnostics()).apply();
         return snapshot;
     }
+
     static String summary(Snapshot snap) {
         if(snap.sourcesOk==0)
-            return "⚠️ منابع نتایج فوتبال در حال حاضر پاسخ ندادند. آخرین نتایج تأییدنشده ارسال نمی‌شود.";
-        if(snap.games.isEmpty())
-            return "⚽ در حال حاضر نتیجه زنده یا بازی مهم پایان‌یافته در بازه بررسی‌شده یافت نشد.";
-        StringBuilder sb=new StringBuilder("⚽ نتایج معتبر فوتبال اروپا، ایران و جهان\n");
+            return "⚠️ منابع نتایج فوتبال پاسخ ندادند. نتیجه تأییدنشده ارسال نمی‌شود.";
+        StringBuilder msg=new StringBuilder("⚽ نتایج فوتبال | اولویت لیگ ایران\n");
+        msg.append("\n🇮🇷 لیگ برتر ایران و جام‌های داخلی:\n");
+        int local=0;
+        for(Match m:snap.games) {
+            if(!m.iran)continue;
+            if(local++>=14)break;
+            msg.append(m.line()).append("\n");
+        }
+        if(local==0) {
+            msg.append(snap.iranFeedsOk>0 ?
+                "در بازه بررسی‌شده نتیجه تازه‌ای از لیگ ایران ثبت نشده است.\n":
+                "⚠️ منابع اختصاصی ایران پاسخ ندادند؛ برای بررسی /footballstatus را بزن.\n");
+        }
+        msg.append("\n🌍 نتایج مهم اروپا و جهان:\n");
+        int world=0;
+        for(Match m:snap.games){
+            if(m.iran)continue;
+            if(world++>=12)break;
+            msg.append(m.line()).append("\n");
+        }
+        if(world==0)msg.append("نتیجه مهم تازه‌ای در منابع فعلی ثبت نشده است.\n");
+        msg.append("\nمنابع: ").append(snap.iranCovered?
+            "FotMob / Sofascore برای ایران؛ ":"")
+            .append("ESPN برای جهان. نام گل‌زن فقط در صورت دریافت داده نمایش داده می‌شود.");
+        return msg.toString();
+    }
+    static String iranSummary(Snapshot snap) {
+        StringBuilder msg=new StringBuilder("🇮🇷 آخرین نتایج لیگ برتر ایران\n");
         int count=0;
         for(Match m:snap.games) {
+            if(!m.iran)continue;
             if(count++>=18)break;
-            sb.append(m.line()).append("\n");
+            msg.append("\n").append(m.line()).append("\nمنبع: ").append(m.source).append("\n");
         }
-        sb.append("🔎 منابع: ESPN / Sofascore / FotMob (مطابق داده دریافت‌شده).");
-        return sb.toString();
+        if(count==0)msg.append(snap.iranFeedsOk>0 ?
+            "مسابقه زنده یا پایان‌یافته‌ای در بازه اخیر از لیگ ایران دریافت نشد.":
+            "⚠️ دسترسی به داده‌های لیگ ایران برقرار نشد؛ /footballstatus را بررسی کن.");
+        msg.append("\n\nوضعیت: ").append(snap.diagnostics());
+        return msg.toString();
     }
     private static String key(Match m) { return m.id; }
     private static JSONObject stateEntry(Match m) throws Exception {
@@ -538,27 +558,15 @@ final class FootballLiveTracker {
     }
     private static final long MAX_STATE_AGE=TimeUnit.DAYS.toMillis(2);
     private static String goalScorer(Match m) {
-        if(!m.id.startsWith("sofa:"))return "";
-        try{
-            String event=m.id.substring(5);
-            JSONObject data=getJson("https://www.sofascore.com/api/v1/event/"+
-                event+"/incidents",250_000);
-            JSONArray arr=data.optJSONArray("incidents");
-            if(arr==null)return "";
-            for(int i=0;i<arr.length();i++){
-                JSONObject x=arr.optJSONObject(i);
-                if(x==null)continue;
-                if(!"goal".equals(x.optString("incidentType","")))continue;
-                if(x.optInt("homeScore",-99)!=m.h||x.optInt("awayScore",-99)!=m.a)continue;
-                JSONObject player=x.optJSONObject("player");
-                if(player==null)continue;
-                String scorer=text(player.optString("name",""),60);
-                int minute=x.optInt("time",0);
-                return scorer.isEmpty()?"":("⚽ زننده گل: "+scorer+
-                    (minute>0 && minute<=130?" ("+minute+"′)":""));
-            }
-        }catch(Exception ignored){ }
-        return "";
+        String all = m.scorers;
+        if (all==null||all.isEmpty()) {
+            if(m.id.startsWith("sofa:")) all=sofaGoals(m.id.substring(5));
+            else if(m.id.startsWith("fotmob:")) all=fotmobGoals(m.id.substring(7));
+        }
+        if(all==null||all.isEmpty())return "";
+        // Only claim a known scorer when incident details exist.
+        String[] goals=all.split("، ");
+        return "⚽ گل‌زن گزارش‌شده: " + goals[goals.length-1];
     }
     static final class Update {
         Snapshot snapshot;
