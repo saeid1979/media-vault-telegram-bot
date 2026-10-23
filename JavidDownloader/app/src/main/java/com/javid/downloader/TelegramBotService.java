@@ -64,7 +64,7 @@ public final class TelegramBotService extends Service {
     public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.3.0 · personalized favorite-team football alerts";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.4.0 · standings and fixtures";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -78,6 +78,9 @@ public final class TelegramBotService extends Service {
     };
     private final AtomicInteger queuedReplies = new AtomicInteger();
     private final ExecutorService downloadExecutor = Executors.newFixedThreadPool(2);
+    private final ExecutorService footballQueries = Executors.newFixedThreadPool(2);
+    private final java.util.concurrent.ConcurrentHashMap<Long,Long> footballQueryAt =
+        new java.util.concurrent.ConcurrentHashMap<>();
     // Never edit Telegram for every yt-dlp callback: throttle progress to avoid flood limits.
     private final ScheduledExecutorService progressExecutor =
         Executors.newScheduledThreadPool(2);
@@ -416,6 +419,7 @@ public final class TelegramBotService extends Service {
         unwatchNetwork();
         preferences().edit().putLong("service_heartbeat", 0L).apply();
         downloadExecutor.shutdownNow();
+        footballQueries.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
@@ -429,6 +433,7 @@ public final class TelegramBotService extends Service {
         if (c != null) c.disconnect();
         pollExecutor.shutdownNow();
         downloadExecutor.shutdownNow();
+        footballQueries.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
         unwatchNetwork();
@@ -524,7 +529,7 @@ public final class TelegramBotService extends Service {
                         }
                     }
                     errors = 0;
-                    status("✅ متصل به @" + username + " · v2.3.0 · بات فعال است");
+                    status("✅ متصل به @" + username + " · v2.4.0 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
                     errors++;
@@ -595,6 +600,24 @@ public final class TelegramBotService extends Service {
             long who = from.optLong("id");
             long chat = message.getJSONObject("chat").optLong("id");
             int promptId = message.optInt("message_id", 0);
+            String footballData=callback.optString("data","");
+            if(footballData.startsWith("fx:") || footballData.startsWith("table:")) {
+                JSONObject chatInfo=message.optJSONObject("chat");
+                if(chatInfo==null || !"private".equals(chatInfo.optString("type")))return;
+                String[] args=footballData.split(":");
+                if(args.length==2 && "table".equals(args[0]) &&
+                    FootballFixturesStandings.validLeague(args[1])) {
+                    sendFootballQuery(who,chat,tok,"table",args[1]);return;
+                }
+                if(args.length==3 && "fx".equals(args[0]) &&
+                    ("today".equals(args[1]) || "tomorrow".equals(args[1]) ||
+                     "week".equals(args[1])) &&
+                    ("all".equals(args[2])||
+                     FootballFixturesStandings.validLeague(args[2]))) {
+                    sendFootballQuery(who,chat,tok,args[1],args[2]);return;
+                }
+                return;
+            }
             String favoriteData=callback.optString("data","");
             if(favoriteData.startsWith("fav:")) {
                 JSONObject chatObject=message.optJSONObject("chat");
@@ -755,6 +778,18 @@ public final class TelegramBotService extends Service {
             text.equals("🏠 منوی اصلی")) {
             nextLinkFormat.remove(user);
             welcomeMenu(user,chat,tok);
+            return;
+        }
+        if(text.equals("📅 برنامه بازی‌ها") || text.equals("/fixtures") ||
+            text.equals("/matches")) {
+            if(!canUseMenuFeatures(user))sendText(chat,accessMessage(user),tok);
+            else sendText(chat,"📅 امروز، فردا یا برنامه هفتگی را انتخاب کن.",fixturePicker(),tok);
+            return;
+        }
+        if(text.equals("🏆 جدول لیگ‌ها") || text.equals("/table") ||
+            text.equals("/standings")) {
+            if(!canUseMenuFeatures(user))sendText(chat,accessMessage(user),tok);
+            else sendText(chat,"🏆 لیگ دلخواهت را انتخاب کن.",standingsPicker(),tok);
             return;
         }
         if(text.equals("⭐ تیم‌های محبوب") || text.equals("/myteams") ||
@@ -1085,6 +1120,7 @@ public final class TelegramBotService extends Service {
     private static JSONObject mainMenu() throws Exception {
         return replyMenu(
             row("🇮🇷 فوتبال ایران","🌍 فوتبال جهان"),
+            row("📅 برنامه بازی‌ها","🏆 جدول لیگ‌ها"),
             row("⭐ تیم‌های محبوب","🔔 اعلان‌ها"),
             row("⬇️ دانلود ویدیو","🎵 دانلود MP3"),
             row("👤 حساب من","⚙️ تنظیمات"),
@@ -1107,7 +1143,7 @@ public final class TelegramBotService extends Service {
                 "\nبعد از تأیید، بخش‌های فوتبال و دانلود فعال می‌شوند.",mainMenu(),token);
             return;
         }
-        sendText(chat,"🤖 Javid Downloader 2.3.0\n"+
+        sendText(chat,"🤖 Javid Downloader 2.4.0\n"+
             "از دکمه‌های زیر استفاده کن؛ دیگر لازم نیست دستوری حفظ کنی."+
             "\n⚽ فوتبال ایران و جهان | ⬇️ دانلود | 🔔 مدیریت اعلان‌ها",
             mainMenu(),token);
@@ -1179,6 +1215,73 @@ public final class TelegramBotService extends Service {
             }
         }
         sendText(chat,info,menu,tok);
+    }
+    private static JSONObject fixturePicker() throws Exception {
+        return keyboard(
+            new JSONArray()
+                .put(new JSONObject().put("text","📅 امروز").put("callback_data","fx:today:all"))
+                .put(new JSONObject().put("text","⏭ فردا").put("callback_data","fx:tomorrow:all")),
+            new JSONArray()
+                .put(new JSONObject().put("text","🗓 ۷ روز آینده").put("callback_data","fx:week:all")),
+            new JSONArray()
+                .put(new JSONObject().put("text","🇮🇷 ایران (هفته)")
+                    .put("callback_data","fx:week:IRN"))
+                .put(new JSONObject().put("text","🏴 انگلیس (هفته)")
+                    .put("callback_data","fx:week:ENG")),
+            new JSONArray()
+                .put(new JSONObject().put("text","🇪🇸 اسپانیا (هفته)")
+                    .put("callback_data","fx:week:ESP"))
+        );
+    }
+    private static JSONObject standingsPicker() throws Exception {
+        return keyboard(
+            new JSONArray()
+                .put(new JSONObject().put("text","🇮🇷 لیگ برتر ایران")
+                    .put("callback_data","table:IRN")),
+            new JSONArray()
+                .put(new JSONObject().put("text","🏴 لیگ انگلیس")
+                    .put("callback_data","table:ENG"))
+                .put(new JSONObject().put("text","🇪🇸 لالیگا")
+                    .put("callback_data","table:ESP")),
+            new JSONArray()
+                .put(new JSONObject().put("text","🇩🇪 بوندس‌لیگا")
+                    .put("callback_data","table:GER"))
+                .put(new JSONObject().put("text","🇮🇹 سری‌آ")
+                    .put("callback_data","table:ITA")),
+            new JSONArray()
+                .put(new JSONObject().put("text","🇫🇷 لیگ فرانسه")
+                    .put("callback_data","table:FRA"))
+        );
+    }
+    private void sendFootballQuery(long who,long chat,String tok,String action,String league)
+        throws Exception {
+        if(!canUseMenuFeatures(who)){
+            sendText(chat,accessMessage(who),tok);return;
+        }
+        long now=System.currentTimeMillis();
+        Long last=footballQueryAt.get(who);
+        if(last!=null && now-last<6000L){
+            sendText(chat,"⏳ لطفاً چند ثانیه صبر کن.",tok);return;
+        }
+        footballQueryAt.put(who,now);
+        if(footballQueryAt.size()>1000)footballQueryAt.clear();
+        sendText(chat,"🔎 در حال دریافت اطلاعات تازه فوتبال...",tok);
+        try{
+            footballQueries.execute(()->{
+                String msg;
+                try {
+                    msg="table".equals(action)?
+                        FootballFixturesStandings.standings(league):
+                        FootballFixturesStandings.fixtures(
+                            "week".equals(action)?7:1,"tomorrow".equals(action),league);
+                }catch(Exception failure){
+                    msg="⚠️ برنامه مسابقات یا جدول از منابع معتبر دریافت نشد. بعداً دوباره امتحان کن.";
+                }
+                try{sendText(chat,msg,tok);}catch(Exception ignored){}
+            });
+        }catch(java.util.concurrent.RejectedExecutionException failure){
+            sendText(chat,"سرویس موقتاً متوقف شده است.",tok);
+        }
     }
     private static JSONObject keyboard(JSONArray... rows) throws Exception {
         JSONArray all = new JSONArray();
