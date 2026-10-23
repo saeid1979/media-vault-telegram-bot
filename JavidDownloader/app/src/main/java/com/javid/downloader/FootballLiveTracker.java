@@ -58,11 +58,15 @@ final class FootballLiveTracker {
         boolean iranCovered;
         int iranFeedsOk, iranFeedsFailed;
         int iranMatches;
+        int scorerMatches;
+        int scorerUnavailable;
         String iranError = "";
         String diagnostics() {
             return "منابع پاسخگو: " + sourcesOk + "، ناموفق: " +
                 sourcesFailed + "، بازی‌های مهم: " + games.size() +
                 "، لیگ ایران: " + iranMatches + " بازی" +
+                "، منبع گل‌زن: " + scorerMatches + " بازی موفق / " +
+                scorerUnavailable + " بدون جزئیات" +
                 "، منابع ایران: " + iranFeedsOk + " پاسخگو / " + iranFeedsFailed + " ناموفق" +
                 (iranError.isEmpty() ? "" : "، آخرین خطا: " + iranError);
         }
@@ -375,79 +379,124 @@ final class FootballLiveTracker {
         }
     }
 
-    private static String sofaGoals(String id) {
-        JSONObject result;
-        try {
-            result=getJson(SOFA_IRAN+"/event/"+id+"/incidents",220_000);
-        }catch(Exception blocked){return "";}
-        JSONArray incidents=result.optJSONArray("incidents");
-        if(incidents==null)return "";
-        List<String> goals=new ArrayList<>();
-        for(int i=0;i<incidents.length();i++) {
-            JSONObject item=incidents.optJSONObject(i);
-            if(item==null || !"goal".equalsIgnoreCase(item.optString("incidentType","")))continue;
-            JSONObject player=item.optJSONObject("player");
-            String scorer=player==null?"":text(player.optString("name",""),34);
-            if(scorer.isEmpty())continue;
-            int minute=item.optInt("time",-1);
-            int injury=item.optInt("addedTime",0);
-            String stamp=minute>0 && minute<=130 ?
-                " "+minute+(injury>0?"+"+injury:"")+"′" : "";
-            String side=item.optBoolean("isHome",false)?"میزبان":"میهمان";
-            goals.add(scorer+stamp+" ("+side+")");
-        }
-        return compactGoals(goals);
-    }
-    private static String fotmobGoals(String id) {
-        try {
-            JSONObject data=getJson(FOTMOB_IRAN+"/matchDetails?matchId="+id,1_200_000);
-            JSONObject content=data.optJSONObject("content");
-            JSONObject facts=content==null?null:content.optJSONObject("matchFacts");
-            JSONObject events=facts==null?null:facts.optJSONObject("events");
-            JSONArray items=events==null?null:events.optJSONArray("events");
-            if(items==null) {
-                JSONObject header=data.optJSONObject("header");
-                items=header==null?null:header.optJSONArray("events");
-            }
-            if(items==null)return "";
-            List<String> goals=new ArrayList<>();
-            for(int i=0;i<items.length();i++){
-                JSONObject goal=items.optJSONObject(i);
-                if(goal==null || !"goal".equalsIgnoreCase(goal.optString("type","")))continue;
-                JSONObject player=goal.optJSONObject("player");
-                String name=player==null?"":player.optString("name","");
-                if(name.isEmpty())name=goal.optString("nameStr","");
-                name=text(name,34);
-                if(name.isEmpty())continue;
-                String stamp=text(goal.optString("timeStr",""),10);
-                if(stamp.isEmpty()) {
-                    int time=goal.optInt("time",0);
-                    if(time>0 && time<=130)stamp=time+"′";
-                }
-                goals.add(name+(stamp.isEmpty()?"":" "+stamp)+
-                    (goal.optBoolean("isHome",false)?" (میزبان)":" (میهمان)"));
-            }
-            return compactGoals(goals);
-        }catch(Exception unavailable){return "";}
+    private static String nameFrom(JSONObject row) {
+        if(row==null)return "";
+        JSONObject player=row.optJSONObject("player");
+        String name=player==null?"":player.optString("name","");
+        if(name.isEmpty() && player!=null)name=player.optString("shortName","");
+        if(name.isEmpty())name=row.optString("nameStr","");
+        if(name.isEmpty())name=row.optString("playerName","");
+        if(name.isEmpty())name=row.optString("scorerName","");
+        if(name.isEmpty())name=row.optString("name","");
+        return text(name,48);
     }
     private static String compactGoals(List<String> goals) {
         if(goals.isEmpty())return "";
         StringBuilder out=new StringBuilder();
         for(String g:goals){
-            if(out.length()+g.length()>220)break;
+            if(out.length()+g.length()>400)break;
             if(out.length()>0)out.append("، ");
             out.append(g);
         }
         return out.toString();
     }
+    private static String sofaGoals(String id) {
+        try {
+            JSONObject result=getJson(SOFA_IRAN+"/event/"+id+"/incidents",350_000);
+            JSONArray incidents=result.optJSONArray("incidents");
+            if(incidents==null)return "";
+            List<String> goals=new ArrayList<>();
+            for(int i=0;i<incidents.length();i++) {
+                JSONObject item=incidents.optJSONObject(i);
+                if(item==null || !"goal".equalsIgnoreCase(
+                    item.optString("incidentType","")))continue;
+                String scorer=nameFrom(item);
+                if(scorer.isEmpty())continue;
+                int minute=item.optInt("time",-1);
+                int injury=item.optInt("addedTime",0);
+                String stamp=minute>0 && minute<=130 ?
+                    " "+minute+(injury>0?"+"+injury:"")+"′" : "";
+                String side=item.optBoolean("isHome",false)?"میزبان":"میهمان";
+                goals.add(scorer+stamp+" ("+side+")");
+            }
+            return compactGoals(goals);
+        }catch(Exception unavailable){return "";}
+    }
+    private static String fotmobGoals(String id) {
+        try {
+            JSONObject data=getJson(FOTMOB_IRAN+"/matchDetails?matchId="+id,2_200_000);
+            // FotMob uses several event structures, dependent on competition.
+            // Prefer matchFacts events; some low-coverage leagues only return
+            // header.events, or lists without the player object.
+            List<JSONArray> candidates=new ArrayList<>();
+            JSONObject content=data.optJSONObject("content");
+            JSONObject facts=content==null?null:content.optJSONObject("matchFacts");
+            if(facts!=null){
+                JSONObject events=facts.optJSONObject("events");
+                if(events!=null) {
+                    JSONArray list=events.optJSONArray("events");
+                    if(list!=null)candidates.add(list);
+                }
+                JSONArray list=facts.optJSONArray("events");
+                if(list!=null)candidates.add(list);
+            }
+            JSONObject header=data.optJSONObject("header");
+            if(header!=null) {
+                JSONArray list=header.optJSONArray("events");
+                if(list!=null)candidates.add(list);
+            }
+            for(JSONArray events:candidates) {
+                List<String> goals=new ArrayList<>();
+                for(int i=0;i<events.length();i++) {
+                    JSONObject event=events.optJSONObject(i);
+                    if(event==null)continue;
+                    String kind=event.optString("type",event.optString("eventType",""));
+                    if(!kind.toLowerCase(Locale.ROOT).contains("goal"))continue;
+                    String scorer=nameFrom(event);
+                    if(scorer.isEmpty())continue;
+                    String stamp=text(event.optString("timeStr",""),12);
+                    if(stamp.isEmpty()){
+                        int minute=event.optInt("time",event.optInt("minute",0));
+                        if(minute>0 && minute<=130)
+                            stamp=minute+"′";
+                    }
+                    goals.add(scorer+(stamp.isEmpty()?"":" "+stamp)+
+                        (event.optBoolean("isHome",false)?" (میزبان)":" (میهمان)"));
+                }
+                if(!goals.isEmpty())return compactGoals(goals);
+            }
+            return "";
+        }catch(Exception unavailable){return "";}
+    }
+
+    private static final class CachedGoals {
+        String text;
+        long at;
+        CachedGoals(String text,long at){this.text=text;this.at=at;}
+    }
+    private static final java.util.concurrent.ConcurrentHashMap<String,CachedGoals>
+        goalCache=new java.util.concurrent.ConcurrentHashMap<>();
+    private static String cachedGoals(Match match) {
+        long now=System.currentTimeMillis();
+        CachedGoals cached=goalCache.get(match.id);
+        long ttl=match.live?TimeUnit.MINUTES.toMillis(2):TimeUnit.HOURS.toMillis(4);
+        if(cached!=null && now-cached.at<ttl)return cached.text;
+        String result="";
+        if(match.id.startsWith("sofa:"))result=sofaGoals(match.id.substring(5));
+        else if(match.id.startsWith("fotmob:"))result=fotmobGoals(match.id.substring(7));
+        if(goalCache.size()>64)goalCache.clear();
+        goalCache.put(match.id,new CachedGoals(result,now));
+        return result;
+    }
     private static void enrichIranGoals(Snapshot snap) {
-        int enriched=0;
+        int inspected=0;
         for(Match match:snap.games) {
-            if(!match.iran || match.h+match.a==0 || match.h<0 || match.a<0)continue;
-            if(enriched>=4)break;
-            enriched++;
-            if(match.id.startsWith("sofa:"))match.scorers=sofaGoals(match.id.substring(5));
-            else if(match.id.startsWith("fotmob:"))match.scorers=fotmobGoals(match.id.substring(7));
+            if(!match.iran || match.h+match.a<=0 || match.h<0 || match.a<0)continue;
+            if(inspected>=12)break;
+            inspected++;
+            match.scorers=cachedGoals(match);
+            if(match.scorers.isEmpty())snap.scorerUnavailable++;
+            else snap.scorerMatches++;
         }
     }
 
@@ -560,8 +609,7 @@ final class FootballLiveTracker {
     private static String goalScorer(Match m) {
         String all = m.scorers;
         if (all==null||all.isEmpty()) {
-            if(m.id.startsWith("sofa:")) all=sofaGoals(m.id.substring(5));
-            else if(m.id.startsWith("fotmob:")) all=fotmobGoals(m.id.substring(7));
+            all=cachedGoals(m);
         }
         if(all==null||all.isEmpty())return "";
         // Only claim a known scorer when incident details exist.
