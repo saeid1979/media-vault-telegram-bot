@@ -64,7 +64,7 @@ public final class TelegramBotService extends Service {
     public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.1.0 · auto-reconnect, boot resume and live football";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.1.1 · Persian Gulf Pro League scores and scorers";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -516,7 +516,7 @@ public final class TelegramBotService extends Service {
                         }
                     }
                     errors = 0;
-                    status("✅ متصل به @" + username + " · v2.1.0 · بات فعال است");
+                    status("✅ متصل به @" + username + " · v2.1.1 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
                     errors++;
@@ -732,6 +732,19 @@ public final class TelegramBotService extends Service {
         }
         // Private digest is opt-in, and only an already approved member
         // can subscribe. Channel publication is configured separately by owner.
+        if ((text.equals("/footballiran") || text.startsWith("/footballiran@")) && isOwner(user)) {
+            sendText(chat,"⏳ در حال بررسی اختصاصی لیگ برتر ایران و گل‌زن‌ها...",tok);
+            digestExecutor.execute(() -> {
+                try {
+                    FootballLiveTracker.Snapshot snapshot=football.collect();
+                    sendText(chat,FootballLiveTracker.iranSummary(snapshot),tok);
+                }catch(Exception unavailable){
+                    try {sendText(chat,"⚠️ دریافت لیگ ایران موفق نبود. /footballstatus را بررسی کن.",tok);}
+                    catch(Exception ignored){}
+                }
+            });
+            return;
+        }
         if ((text.equals("/footballnow") || text.startsWith("/footballnow@")) && isOwner(user)) {
             sendText(chat,"⏳ در حال بررسی نتایج مهم اروپا و ایران از چند منبع...",tok);
             digestExecutor.execute(() -> {
@@ -777,7 +790,7 @@ public final class TelegramBotService extends Service {
                 "/digestjoin عضویت داوطلبانه\n/digestleave لغو پیام خصوصی\n" +
                 (isOwner(user) ? "مدیریت:\n/digestto @ChannelName تنظیم کانال\n" +
                     "/digeston فعال‌سازی ساعتی\n/digestoff توقف انتشار\n" +
-                    "/digestpreview پیش‌نمایش نتایج فوتبال\n/digestnow ارسال فوری\n/digeststatus وضعیت\n/footballnow نتایج اکنون\n/footballstatus سلامت منابع" :
+                    "/digestpreview پیش‌نمایش نتایج فوتبال\n/digestnow ارسال فوری\n/digeststatus وضعیت\n/footballnow نتایج جهان\n/footballiran لیگ برتر ایران و گل‌زن‌ها\n/footballstatus سلامت منابع" :
                     "فقط نتایج فوتبال و هشدار بارندگی، بدون اخبار عمومی."), tok);
             return;
         }
