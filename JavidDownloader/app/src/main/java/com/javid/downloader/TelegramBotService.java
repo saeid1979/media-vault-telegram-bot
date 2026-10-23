@@ -64,7 +64,7 @@ public final class TelegramBotService extends Service {
     public static final String PREF_AUTO_RESUME = "bot_auto_resume";
     public static final String PREFS = "javid_telegram_bot";
     public static final String KEY_STATUS = "status";
-    private static final String BUILD_LABEL = "Javid Downloader Android 2.4.0 · standings and fixtures";
+    private static final String BUILD_LABEL = "Javid Downloader Android 2.5.0 · weather cities and forecast alerts";
     private static final String CHANNEL = "javid_telegram_bot_foreground";
     private static final int NOTIFICATION_ID = 32780;
     private static final long MAX_UPLOAD = 45L * 1024 * 1024;
@@ -79,6 +79,18 @@ public final class TelegramBotService extends Service {
     private final AtomicInteger queuedReplies = new AtomicInteger();
     private final ExecutorService downloadExecutor = Executors.newFixedThreadPool(2);
     private final ExecutorService footballQueries = Executors.newFixedThreadPool(2);
+    private final ExecutorService weatherQueries = Executors.newFixedThreadPool(2);
+    private final Map<Long,Boolean> waitingCityQuery=new ConcurrentHashMap<>();
+    private final Map<String,PendingCity> pendingCityResults=new ConcurrentHashMap<>();
+    private static final class PendingCity {
+        final long user;
+        final WeatherCityStore.City city;
+        final long expires;
+        PendingCity(long user,WeatherCityStore.City city){
+            this.user=user;this.city=city;
+            this.expires=System.currentTimeMillis()+TimeUnit.MINUTES.toMillis(12);
+        }
+    }
     private final java.util.concurrent.ConcurrentHashMap<Long,Long> footballQueryAt =
         new java.util.concurrent.ConcurrentHashMap<>();
     // Never edit Telegram for every yt-dlp callback: throttle progress to avoid flood limits.
@@ -232,6 +244,7 @@ public final class TelegramBotService extends Service {
     }
     private BotUserStore userStore;
     private TeamFavoritesStore favoriteStore;
+    private WeatherCityStore weatherStore;
     private BotStatsStore botStats;
     private BotDownloadLogStore audit;
     private HourlyDigestPublisher digests;
@@ -304,9 +317,10 @@ public final class TelegramBotService extends Service {
         super.onCreate();
         userStore = new BotUserStore(this);
         favoriteStore = new TeamFavoritesStore(this);
+        weatherStore = new WeatherCityStore(this);
         botStats = new BotStatsStore(this);
         audit = new BotDownloadLogStore(this);
-        digests = new HourlyDigestPublisher(this, preferences(), userStore, favoriteStore);
+        digests = new HourlyDigestPublisher(this, preferences(), userStore, favoriteStore, weatherStore);
         football = new FootballLiveTracker(preferences());
         rainAlerts = new RainAlerts(preferences());
         NotificationManager manager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -395,12 +409,14 @@ public final class TelegramBotService extends Service {
             if (!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
                 return;
             try {
-                RainAlerts.Report report=rainAlerts.check(true);
-                if(!report.notices.isEmpty()) {
+                RainAlerts.Report report=rainAlerts.check(true,
+                    weatherStore.forMonitoring(userStore.digestRecipients()));
+                if(!report.events.isEmpty()) {
                     String secret=token();
-                    for(String alert:report.notices)
-                        if(running && preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))
-                            digests.sendAlert(secret,alert);
+                    for(RainAlerts.RainEvent alert:report.events) {
+                        if(!running || !preferences().getBoolean(HourlyDigestPublisher.ENABLED,false))break;
+                        digests.sendRainEvent(secret,alert);
+                    }
                 }
             }catch(Exception ignored){}
         }, 40, 15*60, TimeUnit.SECONDS);
@@ -420,6 +436,7 @@ public final class TelegramBotService extends Service {
         preferences().edit().putLong("service_heartbeat", 0L).apply();
         downloadExecutor.shutdownNow();
         footballQueries.shutdownNow();
+        weatherQueries.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
@@ -434,12 +451,14 @@ public final class TelegramBotService extends Service {
         pollExecutor.shutdownNow();
         downloadExecutor.shutdownNow();
         footballQueries.shutdownNow();
+        weatherQueries.shutdownNow();
         progressExecutor.shutdownNow();
         digestExecutor.shutdownNow();
         unwatchNetwork();
         preferences().edit().putLong("service_heartbeat", 0L).apply();
         if (audit != null) audit.close();
         if (botStats != null) botStats.close();
+        if (weatherStore != null) weatherStore.close();
         if (favoriteStore != null) favoriteStore.close();
         if (userStore != null) userStore.close();
         for (ExecutorService lane : replyLanes) lane.shutdownNow();
@@ -529,7 +548,7 @@ public final class TelegramBotService extends Service {
                         }
                     }
                     errors = 0;
-                    status("✅ متصل به @" + username + " · v2.4.0 · بات فعال است");
+                    status("✅ متصل به @" + username + " · v2.5.0 · بات فعال است");
                 } catch (Exception failure) {
                     if (!running) break;
                     errors++;
@@ -1124,15 +1143,16 @@ public final class TelegramBotService extends Service {
         return replyMenu(
             row("🇮🇷 فوتبال ایران","🌍 فوتبال جهان"),
             row("📅 برنامه بازی‌ها","🏆 جدول لیگ‌ها"),
-            row("⭐ تیم‌های محبوب","🔔 اعلان‌ها"),
+            row("⭐ تیم‌های محبوب","🌧 آب‌وهوا"),
+            row("🔔 اعلان‌ها","👤 حساب من"),
             row("⬇️ دانلود ویدیو","🎵 دانلود MP3"),
-            row("👤 حساب من","⚙️ تنظیمات"),
-            row("❓ راهنما"));
+            row("⚙️ تنظیمات","❓ راهنما"));
     }
     private static JSONObject alertsMenu() throws Exception {
         return replyMenu(
             row("✅ عضویت اعلان‌ها","🔕 قطع اعلان‌ها"),
-            row("⭐ تیم‌های محبوب","ℹ️ راهنمای اعلان‌ها"),
+            row("⭐ تیم‌های محبوب","🌧 آب‌وهوا"),
+            row("ℹ️ راهنمای اعلان‌ها"),
             row("🏠 منوی اصلی"));
     }
     private static JSONObject settingsMenu() throws Exception {
@@ -1146,7 +1166,7 @@ public final class TelegramBotService extends Service {
                 "\nبعد از تأیید، بخش‌های فوتبال و دانلود فعال می‌شوند.",mainMenu(),token);
             return;
         }
-        sendText(chat,"🤖 Javid Downloader 2.4.0\n"+
+        sendText(chat,"🤖 Javid Downloader 2.5.0\n"+
             "از دکمه‌های زیر استفاده کن؛ دیگر لازم نیست دستوری حفظ کنی."+
             "\n⚽ فوتبال ایران و جهان | ⬇️ دانلود | 🔔 مدیریت اعلان‌ها",
             mainMenu(),token);
