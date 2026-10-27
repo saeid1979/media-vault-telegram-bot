@@ -175,6 +175,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "2. تأیید کن که حق دانلود داری.\n"
         "3. کیفیت را انتخاب کن.\n"
         "4. منتظر آماده‌سازی فایل بمان.\n\n"
+        "🌧️ هشدار بارندگی بیشتر از ۵۰ درصد:\\n"
+        "/rain_on [city] فعال‌سازی\\n"
+        "/rain_off [city] غیرفعال‌سازی\\n"
+        "/rain_status شهرهای فعال\\n"
+        "/rain_now [city] بررسی فوری\\n\\n"
         "این ربات از کوکی، لاگین، محتوای خصوصی، DRM و دور زدن محدودیت پلتفرم‌ها پشتیبانی نمی‌کند."
     )
     await update.message.reply_text(text)
