@@ -16,6 +16,7 @@ from telegram.ext import (
 
 from app.config import settings
 from app import db
+from app import weather_alerts
 from app.downloader import extract_info, download_media, DownloadError
 from app.direct_downloader import is_direct_media_url, download_direct_media
 from app.keyboards import rights_keyboard, format_keyboard
@@ -161,7 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "من MediaVault Bot هستم.\n"
         "لینک محتوایی را بفرست که مالک آن هستی یا اجازه دانلودش را داری.\n\n"
         "پشتیبانی نسخه اول: YouTube, Instagram, TikTok, Facebook و لینک مستقیم رسانه.\n\n"
-        "دستورها:\n/help راهنما\n/history تاریخچه\n/limits محدودیت‌ها"
+        "دستورها:\n/help راهنما\n/history تاریخچه\n/limits محدودیت‌ها\n/rain_on هشدار بارندگی"
     )
     await update.message.reply_text(text)
 
@@ -174,6 +175,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "2. تأیید کن که حق دانلود داری.\n"
         "3. کیفیت را انتخاب کن.\n"
         "4. منتظر آماده‌سازی فایل بمان.\n\n"
+        "🌧️ هشدار بارندگی بیشتر از ۵۰ درصد:\n"
+        "/rain_on [city] فعال‌سازی\n"
+        "/rain_off [city] غیرفعال‌سازی\n"
+        "/rain_status شهرهای فعال\n"
+        "/rain_now [city] بررسی فوری\n\n"
         "این ربات از کوکی، لاگین، محتوای خصوصی، DRM و دور زدن محدودیت پلتفرم‌ها پشتیبانی نمی‌کند."
     )
     await update.message.reply_text(text)
@@ -480,6 +486,13 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def post_init(application: Application) -> None:
     db.init_db()
     application.job_queue.run_repeating(cleanup_job, interval=3600, first=30)
+    weather_alerts.init_db()
+    application.job_queue.run_repeating(
+        weather_alerts.rain_check_job,
+        interval=weather_alerts.CHECK_MINUTES * 60,
+        first=60,
+        name="rain_probability_alerts",
+    )
 
 
 def main() -> None:
@@ -499,6 +512,10 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("history", history_cmd))
     app.add_handler(CommandHandler("limits", limits_cmd))
+    app.add_handler(CommandHandler("rain_on", weather_alerts.rain_on))
+    app.add_handler(CommandHandler("rain_off", weather_alerts.rain_off))
+    app.add_handler(CommandHandler("rain_status", weather_alerts.rain_status))
+    app.add_handler(CommandHandler("rain_now", weather_alerts.rain_now))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
