@@ -16,6 +16,7 @@ from telegram.ext import (
 
 from app.config import settings
 from app import db
+from app import weather_alerts
 from app.downloader import extract_info, download_media, DownloadError
 from app.direct_downloader import is_direct_media_url, download_direct_media
 from app.keyboards import rights_keyboard, format_keyboard
@@ -480,6 +481,13 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def post_init(application: Application) -> None:
     db.init_db()
     application.job_queue.run_repeating(cleanup_job, interval=3600, first=30)
+    weather_alerts.init_db()
+    application.job_queue.run_repeating(
+        weather_alerts.rain_check_job,
+        interval=weather_alerts.CHECK_MINUTES * 60,
+        first=60,
+        name="rain_probability_alerts",
+    )
 
 
 def main() -> None:
@@ -499,6 +507,10 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("history", history_cmd))
     app.add_handler(CommandHandler("limits", limits_cmd))
+    app.add_handler(CommandHandler("rain_on", weather_alerts.rain_on))
+    app.add_handler(CommandHandler("rain_off", weather_alerts.rain_off))
+    app.add_handler(CommandHandler("rain_status", weather_alerts.rain_status))
+    app.add_handler(CommandHandler("rain_now", weather_alerts.rain_now))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
