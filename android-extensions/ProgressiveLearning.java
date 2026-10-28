@@ -107,7 +107,7 @@ final class ProgressiveLearning {
         }
     }
     private static String url(String language,String cefr,String topic){
-        String query=("es".equals(language)?"VideoELE español España ": "BBC Learning English ")+cefr+" "+topic+" video lesson";
+        String query=("es".equals(language)?"VideoELE español España ": "VOA Learning English American English ")+cefr+" "+topic+" video lesson";
         try {return "https://www.youtube.com/results?search_query="+URLEncoder.encode(query,"UTF-8");}
         catch(Exception e){return "https://www.youtube.com";}
     }
@@ -196,7 +196,8 @@ final class ProgressiveLearning {
             if(!validClock(time))return "فرمت ساعت صحیح نیست. نمونه: /course_on es 09:00";
             register(id);
             setCurrentLang(id,language);
-            prefs.edit().putBoolean(str(id,language,"enabled"),true)
+            prefs.edit().putString(str(id,language,"sent"),date())
+                .putBoolean(str(id,language,"enabled"),true)
                 .putString(str(id,language,"at"),time)
                 .putBoolean("lang_lesson_on_"+id,false).apply(); // avoid legacy A2 duplicate
             return "✅ دوره "+language.toUpperCase(Locale.ROOT)+" از سطح فعلی فعال شد.\n"+
@@ -273,6 +274,7 @@ final class ProgressiveLearning {
             if(!prefs.getBoolean(str(id,language,"unlocked"),false))
                 return "ابتدا به تمرین پاسخ بده یا /solution "+language+" را ببین.";
             prefs.edit().putInt(str(id,language,"index"),i+1)
+                .putString(str(id,language,"sent"),date())
                 .putBoolean(str(id,language,"unlocked"),false).apply();
             return lesson(id,language);
         }
