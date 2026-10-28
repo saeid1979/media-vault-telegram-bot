@@ -47,7 +47,13 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Install required Android platform
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          set -euo pipefail
+          SDKMGR="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -1)"
+          test -n "$SDKMGR"
+          yes | "$SDKMGR" --licenses >/dev/null || true
+          "$SDKMGR" "platforms;android-35" "build-tools;35.0.0"
+
       - name: Build installable debug APK (separate beta app)
         working-directory: android-src
         run: gradle --no-daemon :app:assembleDebug --stacktrace
