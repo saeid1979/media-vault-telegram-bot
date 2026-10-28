@@ -1,10 +1,10 @@
-name: Build JavidDownloader Android APK 3.6.7
+name: Build JavidDownloader Android APK 3.6.8
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - feature/javid-downloader-android-apk-v367
+      - feature/javid-downloader-automations-v368
 
 permissions:
   contents: read
@@ -25,6 +25,13 @@ jobs:
           unzip -q android/JavidDownloader-v3.6.7-source.zip -d android-src
           test -f android-src/app/build.gradle
           test -f android-src/app/src/main/java/com/javid/downloader/TelegramBotService.java
+      - name: Apply local automation sources and versionCode bump
+        run: |
+          base64 -d android/automation_patch_v368.b64 | tar -xJ -C android-src
+          cd android-src
+          python3 patch_automations_v368.py
+          grep -q "versionCode 48" app/build.gradle
+          grep -q "versionName '3.6.8'" app/build.gradle
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -38,6 +45,8 @@ jobs:
           java -cp build/syntax JavaSyntaxCheck app/src/main/java/com/javid/downloader/*.java
           javac -d build/tests app/src/main/java/com/javid/downloader/RainProbabilityPolicy.java tools/RainProbabilityPolicyTest.java
           java -cp build/tests com.javid.downloader.RainProbabilityPolicyTest
+          javac -d build/tests app/src/main/java/com/javid/downloader/QuakePolicy.java tools/QuakePolicyTest.java
+          java -cp build/tests com.javid.downloader.QuakePolicyTest
       - name: Use Android SDK available on Ubuntu runner
         run: |
           echo "ANDROID_HOME=${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
@@ -60,7 +69,7 @@ jobs:
       - name: Publish beta installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v3.6.7-RAIN50-BETA-APK
+          name: JavidDownloader-v3.6.8-AUTOMATIONS-BETA-APK
           path: android-src/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
@@ -70,7 +79,7 @@ jobs:
       - name: Publish unsigned release for secure offline signing
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v3.6.7-RAIN50-RELEASE-UNSIGNED
+          name: JavidDownloader-v3.6.8-AUTOMATIONS-RELEASE-UNSIGNED
           path: android-src/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 7
@@ -92,7 +101,7 @@ jobs:
         if: ${{ env.JAVID_KEYSTORE_B64 != '' && env.JAVID_SIGN_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v3.6.7-RAIN50-SIGNED-UPDATE-APK
+          name: JavidDownloader-v3.6.8-AUTOMATIONS-SIGNED-UPDATE-APK
           path: android-src/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
