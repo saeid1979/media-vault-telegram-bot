@@ -38,8 +38,10 @@ jobs:
           java -cp build/syntax JavaSyntaxCheck app/src/main/java/com/javid/downloader/*.java
           javac -d build/tests app/src/main/java/com/javid/downloader/RainProbabilityPolicy.java tools/RainProbabilityPolicyTest.java
           java -cp build/tests com.javid.downloader.RainProbabilityPolicyTest
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Use Android SDK available on Ubuntu runner
+        run: |
+          echo "ANDROID_HOME=${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          "${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager" --version || true
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
