@@ -14,7 +14,7 @@ import java.util.Set;
 /** Private-chat CEFR learning; six progressive modules per level, each language separately. */
 final class ProgressiveLearning {
     interface Allowed { boolean test(long id); }
-    interface Deliver { void send(long id, String text) throws Exception; }
+    interface Deliver { void send(long id, String language, String text) throws Exception; }
     static final String[] LEVELS={"A1","A2","B1","B2","C1","C2"};
     static final int LESSONS_PER_LEVEL=5;
     static final int COURSE_LENGTH=30;
@@ -294,7 +294,7 @@ final class ProgressiveLearning {
                 String at=prefs.getString(str(id,language,"at"),"09:00");
                 if(!validClock(at)||now.isBefore(LocalTime.parse(at)))continue;
                 try{
-                    delivery.send(id,lesson(id,language));
+                    delivery.send(id,language,lesson(id,language));
                     prefs.edit().putString(str(id,language,"sent"),today.toString()).apply();
                 }catch(Exception ignored){/* retry later; don't advance automatically */}
             }
