@@ -64,6 +64,16 @@ jobs:
           path: android-src/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+      - name: Build official unsigned release APK
+        working-directory: android-src
+        run: gradle --no-daemon :app:assembleRelease --stacktrace
+      - name: Publish unsigned release for secure offline signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: JavidDownloader-v3.6.7-RAIN50-RELEASE-UNSIGNED
+          path: android-src/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Prepare original signing key when available
         if: ${{ env.JAVID_KEYSTORE_B64 != '' && env.JAVID_SIGN_PASSWORD != '' }}
         run: |
