@@ -1,10 +1,10 @@
-name: Build JavidDownloader Android APK 3.6.9
+name: Build JavidDownloader Android APK 3.7.0
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - feature/javid-downloader-language-v369
+      - feature/javid-downloader-learning-v370
 
 permissions:
   contents: read
@@ -40,6 +40,16 @@ jobs:
           python3 patch_language_v369.py
           grep -q 'versionCode 49' app/build.gradle
           grep -q "versionName '3.6.9'" app/build.gradle
+      - name: Integrate progressive lessons, native TTS audio and topic videos
+        run: |
+          cp android-extensions/ProgressiveLearning.java android-src/app/src/main/java/com/javid/downloader/
+          cp android-extensions/CourseAudioDelivery.java android-src/app/src/main/java/com/javid/downloader/
+          cp android-extensions/patch_progressive_v370.py android-src/
+          cd android-src
+          python3 patch_progressive_v370.py
+          grep -q 'versionCode 50' app/build.gradle
+          grep -q "versionName '3.7.0'" app/build.gradle
+          grep -q 'android.intent.action.TTS_SERVICE' app/src/main/AndroidManifest.xml
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -77,7 +87,7 @@ jobs:
       - name: Publish beta installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v3.6.9-LANGUAGE-BETA-APK
+          name: JavidDownloader-v3.7.0-COURSE-BETA-APK
           path: android-src/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
@@ -87,7 +97,7 @@ jobs:
       - name: Publish unsigned release for secure offline signing
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v3.6.9-LANGUAGE-RELEASE-UNSIGNED
+          name: JavidDownloader-v3.7.0-COURSE-RELEASE-UNSIGNED
           path: android-src/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 7
@@ -109,7 +119,7 @@ jobs:
         if: ${{ env.JAVID_KEYSTORE_B64 != '' && env.JAVID_SIGN_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: JavidDownloader-v3.6.9-LANGUAGE-SIGNED-UPDATE-APK
+          name: JavidDownloader-v3.7.0-COURSE-SIGNED-UPDATE-APK
           path: android-src/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
