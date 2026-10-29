@@ -54,10 +54,16 @@ final class DailyLanguageAutomations {
     private static final String WORDS_LANG="lang_words_lang_";
     private static final String WORDS_AT="lang_words_at_";
     private static final String WORDS_SENT="lang_words_sent_";
+    private static final String NEWS_ON="lang_news_on_";
+    private static final String NEWS_AT="lang_news_at_";
+    private static final String NEWS_SENT="lang_news_sent_";
     private static final String TRANSLATION_API=
         "https://api.mymemory.translated.net/get";
     private static final DateTimeFormatter CLOCK=DateTimeFormatter.ofPattern("HH:mm",Locale.US);
     private static final String[] FEED_IDS={"es_news","en_world","en_tech"};
+    private static final String[] COUNTRY_NEWS_IDS={"spain","iran"};
+    private static final String[] COUNTRY_NEWS_URLS={"https://www.rtve.es/api/noticias.rss","https://feeds.bbci.co.uk/persian/rss.xml"};
+    private static final String[] COUNTRY_NEWS_LABELS={"اخبار اسپانیا","اخبار ایران"};
     private static final String[] FEED_URLS={
         "https://feeds.bbci.co.uk/mundo/rss.xml",
         "https://feeds.bbci.co.uk/news/world/rss.xml",
@@ -177,7 +183,8 @@ final class DailyLanguageAutomations {
         return Arrays.asList("/language","/lang_status","/translate_sources",
           "/translate_on","/translate_off","/translate_status","/translate_now",
           "/lesson_on","/lesson_off","/lesson_status","/lesson_now",
-          "/words_on","/words_off","/words_status","/words_now","/words_review").contains(cmd);
+          "/words_on","/words_off","/words_status","/words_now","/words_review",
+          "/news","/news_on","/news_off","/news_status","/news_now").contains(cmd);
     }
 
     private synchronized void register(long id) {
@@ -220,6 +227,7 @@ final class DailyLanguageAutomations {
             languageName(prefs.getString(LESSON_LANG+id,"es"))+"، ساعت "+getClock(id,true):"خاموش").append("\n");
         sb.append("🗣️ واژگان و مرور: ").append(words?
             languageName(prefs.getString(WORDS_LANG+id,"es"))+"، ساعت "+getClock(id,false):"خاموش").append("\n");
+        sb.append("📰 اخبار فارسی: /news_on spain 08:00 یا /news_on iran 09:00\n");
         sb.append("🕒 ساعت‌ها طبق منطقه زمانی گوشی میزبان هستند.\n");
         sb.append("\nمنابع: /translate_sources\n");
         sb.append("فعال‌سازی: /translate_on es_news\n");
@@ -233,6 +241,36 @@ final class DailyLanguageAutomations {
         String[] tokens=args(text);
         String cmd=normalizeCommand(tokens[0]);
         if(cmd.equals("/language")||cmd.equals("/lang_status"))return status(id);
+        if(cmd.equals("/news")||cmd.equals("/news_status"))return newsStatus(id);
+        if(cmd.equals("/news_on")){
+            if(tokens.length<2)return "کشور را انتخاب کن: /news_on spain 08:00 یا /news_on iran 09:00";
+            int idx=countryNewsIndex(tokens[1]);
+            if(idx<0)return "کشور نامعتبر است. گزینه‌ها: spain یا iran";
+            String time=tokens.length>2?tokens[2]:(idx==0?"08:00":"09:00");
+            if(!validTime(time))return "زمان نامعتبر است. قالب ساعت HH:mm است؛ نمونه: /news_on spain 08:00";
+            String key=id+"_"+COUNTRY_NEWS_IDS[idx];
+            prefs.edit().putBoolean(NEWS_ON+key,true).putString(NEWS_AT+key,time).apply();
+            register(id);
+            return "✅ ارسال روزانه "+COUNTRY_NEWS_LABELS[idx]+" به فارسی فعال شد.\n🕒 هر روز ساعت "+time+" به وقت گوشی میزبان بات.\n🔎 پیش‌نمایش: /news_now "+COUNTRY_NEWS_IDS[idx]+"\n🔕 توقف: /news_off "+COUNTRY_NEWS_IDS[idx];
+        }
+        if(cmd.equals("/news_off")){
+            if(tokens.length<2||tokens[1].equalsIgnoreCase("all")){
+                prefs.edit().putBoolean(NEWS_ON+id+"_spain",false).putBoolean(NEWS_ON+id+"_iran",false).apply();
+                return "🔕 ارسال خودکار اخبار اسپانیا و ایران متوقف شد.";
+            }
+            int idx=countryNewsIndex(tokens[1]);
+            if(idx<0)return "کشور نامعتبر است. از spain یا iran استفاده کن.";
+            prefs.edit().putBoolean(NEWS_ON+id+"_"+COUNTRY_NEWS_IDS[idx],false).apply();
+            return "🔕 "+COUNTRY_NEWS_LABELS[idx]+" متوقف شد.";
+        }
+        if(cmd.equals("/news_now")){
+            if(tokens.length<2)return "نمونه: /news_now spain یا /news_now iran";
+            int idx=countryNewsIndex(tokens[1]);
+            if(idx<0)return "کشور نامعتبر است. از spain یا iran استفاده کن.";
+            NewsItem item=fetchLatest(COUNTRY_NEWS_URLS[idx]);
+            String persian=idx==1?item.title:translateTitle(item.title,"es");
+            return formatCountryNews(idx,item,persian)+"\n\n🔎 پیش‌نمایش دستی؛ زمان‌بندی تغییر نکرد.";
+        }
         if(cmd.equals("/translate_sources")){
             return "🌐 منابع عمومی قابل انتخاب (تیترهای کوتاه):\n"+
                 "es_news: BBC Mundo، اسپانیایی\n"+
@@ -454,6 +492,29 @@ final class DailyLanguageAutomations {
             "🔍 ترجمه ماشینی تیتر عمومی، نه متن کامل مقاله.\n"+
             "منبع: "+FEED_LABELS[i]+" | مترجم: MyMemory";
     }
+    private static int countryNewsIndex(String name){
+        if(name==null)return -1;
+        String s=name.trim().toLowerCase(Locale.ROOT);
+        if(s.equals("spain")||s.equals("es")||s.equals("اسپانیا"))return 0;
+        if(s.equals("iran")||s.equals("ir")||s.equals("ایران"))return 1;
+        return -1;
+    }
+    private String newsStatus(long id){
+        StringBuilder b=new StringBuilder("📰 زمان‌بندی اخبار فارسی\\n");
+        for(int i=0;i<COUNTRY_NEWS_IDS.length;i++){
+            String key=id+"_"+COUNTRY_NEWS_IDS[i];
+            b.append("• ").append(COUNTRY_NEWS_LABELS[i]).append(": ")
+             .append(prefs.getBoolean(NEWS_ON+key,false)?"فعال":"خاموش")
+             .append(" | ساعت ").append(prefs.getString(NEWS_AT+key,i==0?"08:00":"09:00")).append("\\n");
+        }
+        return b.append("\\nتنظیم: /news_on spain 08:00\\nتنظیم: /news_on iran 09:00\\nپیش‌نمایش: /news_now spain\\nخاموش‌کردن: /news_off all\\nساعت‌ها به وقت گوشی میزبان هستند.").toString();
+    }
+    private static String formatCountryNews(int i,NewsItem item,String persian){
+        return "📰 "+COUNTRY_NEWS_LABELS[i]+" | خبر به فارسی\\n\\n🇮🇷 "+persian+"\\n"+
+            (item.link.isEmpty()?"":"🔗 "+item.link+"\\n")+
+            "منبع: "+(i==0?"RTVE Noticias":"BBC Persian")+"\\n"+
+            (i==0?"ترجمه ماشینی تیتر خبر است.":"تیتر از منبع فارسی‌زبان دریافت شده است.");
+    }
     private static String dayNow(){return LocalDate.now(ZoneId.systemDefault()).toString();}
     private static boolean passed(LocalTime now,String time){
         return !now.isBefore(LocalTime.parse(time,CLOCK));
@@ -475,6 +536,18 @@ final class DailyLanguageAutomations {
             long id;
             try {id=Long.parseLong(value);}catch(Exception e){continue;}
             if(!eligible.allowed(id))continue;
+            for(int country=0;country<COUNTRY_NEWS_IDS.length;country++){
+                String countryId=COUNTRY_NEWS_IDS[country], key=id+"_"+COUNTRY_NEWS_IDS[country];
+                String clock=prefs.getString(NEWS_AT+key,country==0?"08:00":"09:00");
+                if(!prefs.getBoolean(NEWS_ON+key,false)||day.equals(prefs.getString(NEWS_SENT+key,""))||
+                    !validTime(clock)||time.isBefore(LocalTime.parse(clock,CLOCK)))continue;
+                try{
+                    NewsItem item=fetchLatest(COUNTRY_NEWS_URLS[country]);
+                    String persian=country==1?item.title:translateTitle(item.title,"es");
+                    delivery.send(id,formatCountryNews(country,item,persian));
+                    prefs.edit().putString(NEWS_SENT+key,day).apply();
+                }catch(Exception ignored){ /* retry later; do not invent headlines */ }
+            }
             if(due(id,true,day,time)) {
                 String lang=prefs.getString(LESSON_LANG+id,"es");
                 try {
