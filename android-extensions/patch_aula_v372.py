@@ -37,7 +37,7 @@ bot.write_text(s,encoding="utf-8")
 gradle=Path("app/build.gradle")
 g=gradle.read_text(encoding="utf-8")
 assert "versionCode 51" in g and "versionName '3.7.1'" in g
-g=g.replace("versionCode 51","versionCode 52").replace("versionName '3.7.1'","versionName '3.7.2'")
+g=g.replace("versionCode 51","versionCode 53").replace("versionName '3.7.1'","versionName '3.7.2'")
 gradle.write_text(g,encoding="utf-8")
 assert (root/"AulaPrivateLessons.java").exists()
 print("Aula 3.7.2 private administrator course integrated via",admin)
