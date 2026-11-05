@@ -23,12 +23,9 @@ change('        // Progressive CEFR courses: route before legacy A2-only lessons
        '            if (chat != user || !'+admin+') {\n'
        '                sendText(chat,"⛔ این بخش فقط در چت خصوصی مدیر اصلی فعال است.",tok);return;\n'
        '            }\n'
-       '            String lesson=aulaPrivateLessons.handle(user,text);
-'
-       '            String[] sections=lesson.split("(?====درس صفحه )");
-'
-       '            for(String section:sections)if(!section.trim().isEmpty())sendText(chat,section,tok);
-'
+       '            String lesson=aulaPrivateLessons.handle(user,text);\n'
+       '            String[] sections=lesson.split("(?====درس صفحه )");\n'
+       '            for(String section:sections)if(!section.trim().isEmpty())sendText(chat,section,tok);\n'
        '            return;\n'
        '        }\n'
        '        // Progressive CEFR courses: route before legacy A2-only lessons.')
