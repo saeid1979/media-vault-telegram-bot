@@ -112,7 +112,6 @@ final class AulaPrivateLessons {
         if(from>LAST_PAGE)return "🎓 دوره تمام شد. برای مرور /aula_review";
         int to=Math.min(LAST_PAGE,from+4);
         String[] a=topic(from);
-        String[] examples=parts(from);
         StringBuilder b=new StringBuilder("🇪🇸 آموزش مفصل اسپانیایی A2 | بسته "+(day+1)+
             "\n📖 راهنمای مطالعه صفحات چاپی "+from+" تا "+to+
             "\nموضوع: "+a[0]+" — "+a[1]+
