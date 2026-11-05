@@ -57,21 +57,61 @@ final class AulaPrivateLessons {
         for(int i=0;i<STARTS.length;i++)if(page>=STARTS[i])unit=i;
         return UNITS[unit].split("\\|",-1);
     }
+    // Each five-page study block contains five ORIGINAL teaching messages.
+    // Printed-page references are a study guide, not a reproduction of the book.
+    private static final String[] PATTERNS={
+        "Estudio español porque quiero hablar con mis vecinos.|Aprendo español para trabajar mejor.|Estudio desde hace seis meses.|¿Para qué aprendes español?",
+        "Ayer compré un libro.|La semana pasada fui al centro.|El lunes hablé con mi profesora.|¿Qué hiciste el fin de semana?",
+        "Mi amiga es muy amable.|Mi hermano tiene mucha paciencia.|Nos parecemos en el carácter.|¿Cómo describirías a tu familia?",
+        "Mi habitación es más grande que la tuya.|La cocina está al lado del salón.|Este piso es menos caro.|¿Cómo es tu casa?",
+        "Estoy preparando la cena.|¿Podrías repetir, por favor?|Ahora estamos estudiando.|¿Qué estás haciendo?",
+        "Hoy he aprendido cinco palabras.|Esta semana hemos ido al cine.|Mañana vamos a visitar el museo.|¿Qué has hecho hoy?",
+        "Suelo desayunar a las ocho.|En España se cena bastante tarde.|Me gusta cocinar verduras.|¿Qué sueles comer?",
+        "Me duele la garganta.|Debes descansar un poco.|Bebe agua y duerme bien.|¿Qué haces para cuidarte?",
+        "Antes vivía en otra ciudad.|Cuando era niño jugaba mucho.|Ahora trabajo desde casa.|¿Cómo era tu vida antes?",
+        "Cuando caminaba, empezó a llover.|Ayer conocí a un amigo.|Era tarde y hacía frío.|¿Qué pasó ayer?"
+    };
+    private static final String[] NOTES={
+        "porque بیانگر علت است؛ para + مصدر هدف را نشان می‌دهد؛ desde hace + مدت زمان برای کاری است که از گذشته شروع شده و ادامه دارد.",
+        "pretérito indefinido برای رویداد پایان‌یافته در گذشته است. برای فعل‌های -ar مانند hablar: hablé, hablaste, habló, hablamos, hablasteis, hablaron.",
+        "ser برای ویژگی نسبتاً پایدار و estar برای حالت یا مکان است؛ tener برای مالکیت و بعضی ویژگی‌ها به کار می‌رود.",
+        "مقایسه: más + صفت + que؛ کمتر: menos + صفت + que؛ برای مکان معمولاً estar استفاده می‌شود.",
+        "estar + gerundio برای کاری است که در جریان است؛ مصدر -ar به -ando و -er/-ir به -iendo تبدیل می‌شود.",
+        "pretérito perfecto: haber در زمان حال + participio؛ he, has, ha, hemos, habéis, han. ir a + مصدر برای برنامه آینده است.",
+        "soler + مصدر یعنی معمولاً کاری را انجام دادن: suelo, sueles, suele, solemos, soléis, suelen.",
+        "doler مانند gustar به کار می‌رود: me duele + اسم مفرد؛ me duelen + اسم جمع. امر مثبت tú در بسیاری از افعال شبیه سوم‌شخص مفرد حال است.",
+        "pretérito imperfecto برای عادت یا توصیف گذشته است: hablaba, comía, vivía. آن را با indefinido اشتباه نگیر.",
+        "imperfecto صحنه و شرایط را توصیف می‌کند؛ indefinido رویداد اصلی و کامل‌شده را روایت می‌کند."
+    };
+    private static String[] parts(int page){return PATTERNS[unitIndex(page)].split("\\|",-1);}
+    private static int unitIndex(int page){int u=0;for(int i=0;i<STARTS.length;i++)if(page>=STARTS[i])u=i;return u;}
     String morning(int day){
         int from=firstPage(day);
-        if(from>LAST_PAGE)return "🎓 دوره ۲۸ روزه Aula Internacional Plus 2 به پایان رسید. برای مرور /aula_review";
+        if(from>LAST_PAGE)return "🎓 دوره تمام شد. برای مرور /aula_review";
         int to=Math.min(LAST_PAGE,from+4);
         String[] a=topic(from);
-        StringBuilder out=new StringBuilder("🇪🇸 آموزش خصوصی اسپانیایی A2 | روز "+(day+1)+"\n");
-        out.append("📖 بازه مطالعه: صفحات چاپی ").append(from).append(" تا ").append(to).append("\n");
-        out.append("📚 موضوع: ").append(a[0]).append(" — ").append(a[1]).append("\n\n");
-        out.append("🧠 نکته گرامری: ").append(a[2]).append("\n");
-        out.append("✍️ مثال: ").append(a[3]).append("\n🇮🇷 معنی: ").append(a[4]).append("\n\n");
-        out.append("🔍 تحلیل: فعل جمله را پیدا کن، زمان آن را مشخص کن و جمله را برای زندگی خودت تغییر بده.\n");
-        out.append("🗣️ تمرین گفتاری: ").append(a[5]).append("\n");
-        out.append("📝 تمرین نوشتاری: با الگوی بالا سه جمله جدید بساز.\n");
-        out.append("📌 این درس توضیح و مثال تألیفی بر اساس موضوعات کتاب است، نه بازنشر پنج صفحه کتاب.");
-        return out.toString();
+        String[] examples=parts(from);
+        StringBuilder b=new StringBuilder("🇪🇸 آموزش مفصل اسپانیایی A2 | بسته "+(day+1)+
+            "\n📖 راهنمای مطالعه صفحات چاپی "+from+" تا "+to+
+            "\nموضوع: "+a[0]+" — "+a[1]+
+            "\nتوجه: توضیحات و تمرین‌های زیر تألیفی هستند؛ متن صفحات کتاب بازنشر نمی‌شود.");
+        for(int page=from;page<=to;page++){
+            int offset=page-from;
+            String example=examples[offset%3];
+            b.append("\n\n===درس صفحه ").append(page).append("===\n");
+            b.append("🎯 هدف یادگیری: ").append(a[1]).append("\n");
+            b.append("📘 گرامر: ").append(a[2]).append("\n");
+            b.append("🔎 شرح فارسی: ").append(NOTES[unitIndex(page)]).append("\n");
+            b.append("✍️ مثال: ").append(example).append("\n");
+            b.append("📚 نمونه دیگر: ").append(a[3]).append("\n");
+            b.append("🇮🇷 معنی نمونه دوم: ").append(a[4]).append("\n");
+            b.append("🧩 تمرین: فعل را مشخص کن؛ جمله را منفی کن؛ یک جمله مشابه با اطلاعات خودت بساز.\n");
+            b.append("🗣️ گفتار: ").append(examples[3]).append("\n");
+            b.append("🎧 شنیداری: جمله نمونه را با صدای بلند بخوان، سپس بدون نگاه کردن آن را بنویس.\n");
+            b.append("✅ خودسنجی: آیا می‌توانی ساختار را در یک موقعیت واقعی به کار ببری؟");
+        }
+        b.append("\n\n🌙 ساعت ۲۲ مرور و سؤال‌های تمرینی ارسال می‌شود.");
+        return b.toString();
     }
     String evening(int day){
         int from=firstPage(day);
