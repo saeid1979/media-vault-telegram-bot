@@ -97,6 +97,19 @@ jobs:
           yes | "$SDKMGR" --licenses >/dev/null || true
           "$SDKMGR" "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Export official Android SDK APK signing tools for offline validation
+        run: |
+          mkdir -p official-apk-tools
+          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" official-apk-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" official-apk-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" official-apk-tools/
+      - name: Publish official Android signing tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-android-apksigner-35
+          path: official-apk-tools/
+          if-no-files-found: error
+          retention-days: 2
       - name: Build installable debug APK (separate beta app)
         working-directory: android-src
         run: gradle --no-daemon :app:assembleDebug --stacktrace
