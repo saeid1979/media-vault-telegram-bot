@@ -23,21 +23,27 @@ change('        // Progressive CEFR courses: route before legacy A2-only lessons
        '            if (chat != user || !'+admin+') {\n'
        '                sendText(chat,"⛔ این بخش فقط در چت خصوصی مدیر اصلی فعال است.",tok);return;\n'
        '            }\n'
-       '            sendText(chat,aulaPrivateLessons.handle(user,text),tok);return;\n'
+       '            String lesson=aulaPrivateLessons.handle(user,text);
+'
+       '            String[] sections=lesson.split("(?====درس صفحه )");
+'
+       '            for(String section:sections)if(!section.trim().isEmpty())sendText(chat,section,tok);
+'
+       '            return;\n'
        '        }\n'
        '        // Progressive CEFR courses: route before legacy A2-only lessons.')
 change('        // Independent private-chat language scheduler; per-user opt-in and dedupe.',
        '        // Private Aula delivery; owner ID stored only after administrator verification.\n'
        '        languageExecutor.scheduleWithFixedDelay(() -> {\n'
        '            if(!running)return;\n'
-       '            aulaPrivateLessons.tick((who,body)-> { if(running)sendText(who,body,token()); });\n'
+       '            aulaPrivateLessons.tick((who,body)-> { if(running) { for(String section:body.split("(?====درس صفحه )"))if(!section.trim().isEmpty())sendText(who,section,token()); } });\n'
        '        }, 90, 5, TimeUnit.MINUTES);\n'
        '        // Independent private-chat language scheduler; per-user opt-in and dedupe.')
 bot.write_text(s,encoding="utf-8")
 gradle=Path("app/build.gradle")
 g=gradle.read_text(encoding="utf-8")
 assert "versionCode 51" in g and "versionName '3.7.1'" in g
-g=g.replace("versionCode 51","versionCode 53").replace("versionName '3.7.1'","versionName '3.7.3'")
+g=g.replace("versionCode 51","versionCode 54").replace("versionName '3.7.1'","versionName '3.7.4'")
 gradle.write_text(g,encoding="utf-8")
 assert (root/"AulaPrivateLessons.java").exists()
-print("Aula 3.7.2 private administrator course integrated via",admin)
+print("Aula 3.7.4 detailed private administrator course integrated via",admin)
