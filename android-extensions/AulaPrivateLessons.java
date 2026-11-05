@@ -16,6 +16,7 @@ final class AulaPrivateLessons {
     private static final String START="aula_private_start";
     private static final String AM_SENT="aula_private_am_sent";
     private static final String PM_SENT="aula_private_pm_sent";
+    private static final String EXTRA="aula_extra_pages";
     private static final DateTimeFormatter CLOCK=DateTimeFormatter.ofPattern("HH:mm",Locale.ROOT);
     private final SharedPreferences p;
     AulaPrivateLessons(SharedPreferences p){this.p=p;}
@@ -25,7 +26,7 @@ final class AulaPrivateLessons {
         String command=text.trim().split("\\s+")[0].split("@",2)[0].toLowerCase(Locale.ROOT);
         return command.equals("/aula")||command.equals("/aula_on")||
             command.equals("/aula_off")||command.equals("/aula_now")||
-            command.equals("/aula_review")||command.equals("/aula_status");
+            command.equals("/aula_review")||command.equals("/aula_status")||command.equals("/aula_next5")||command.equals("/aula_grammar")||command.equals("/aula_speak")||command.equals("/aula_listen")||command.equals("/aula_progress");
     }
     private static final String[] UNITS={
         "El español y tú|عادت‌های یادگیری زبان|desde hace / porque / para|Estudio español desde hace dos años.|دو سال است اسپانیایی می‌خوانم.|¿Por qué estudias español?",
@@ -50,6 +51,7 @@ final class AulaPrivateLessons {
         }catch(Exception ex){return 0;}
     }
     private static int firstPage(int day){return 10+5*day;}
+    private int lessonIndex(){return day()+p.getInt(EXTRA,0)/5;}
     private static String[] topic(int page){
         int unit=0;
         for(int i=0;i<STARTS.length;i++)if(page>=STARTS[i])unit=i;
@@ -95,12 +97,35 @@ final class AulaPrivateLessons {
             return "✅ آموزش خصوصی فعال شد. هر روز 08:30 درس و 22:00 مرور، به وقت Europe/Madrid.\n"+morning(day());
         }
         if(cmd.equals("/aula_off")){p.edit().putBoolean(ENABLED,false).apply();return "🔕 آموزش خصوصی متوقف شد.";}
-        if(cmd.equals("/aula_now"))return morning(day());
-        if(cmd.equals("/aula_review"))return evening(day());
+        if(cmd.equals("/aula_next5")){
+            int next=firstPage(lessonIndex()+1);
+            if(next>LAST_PAGE)return "🎓 دوره کامل شده است.";
+            p.edit().putInt(EXTRA,p.getInt(EXTRA,0)+5).apply();
+            return morning(lessonIndex());
+        }
+        if(cmd.equals("/aula_now"))return morning(lessonIndex());
+        if(cmd.equals("/aula_grammar")){
+            String[] a=topic(firstPage(lessonIndex()));
+            return "📘 گرامر: "+a[2]+"\nمثال: "+a[3]+"\nمعنی: "+a[4]+
+                "\nتمرین: سه جمله مشابه درباره زندگی خودت بساز.";
+        }
+        if(cmd.equals("/aula_speak")){
+            String[] a=topic(firstPage(lessonIndex()));
+            return "🗣️ تمرین مکالمه: "+a[5]+"\nپاسخ را بلند بگو و سپس به اسپانیایی بنویس.";
+        }
+        if(cmd.equals("/aula_listen")){
+            String[] a=topic(firstPage(lessonIndex()));
+            return "🎧 تمرین شنیداری: "+a[3]+
+                "\nبا قابلیت خواندن متن گوشی گوش بده و سپس جمله را بازنویسی کن. فایل صوتی مستقل هنوز موجود نیست.";
+        }
+        if(cmd.equals("/aula_progress"))return "📊 بازه فعلی: صفحات "+
+            firstPage(lessonIndex())+" تا "+Math.min(LAST_PAGE,firstPage(lessonIndex())+4);
+
+        if(cmd.equals("/aula_review"))return evening(lessonIndex());
         return "📚 Aula A2 خصوصی\n"+
             "وضعیت: "+(p.getBoolean(ENABLED,false)?"فعال":"خاموش")+
             "\nزمان: 08:30 و 22:00 (Europe/Madrid)\nروز: "+(day()+1)+
-            "\n/aula_on فعال‌سازی\n/aula_now درس امروز\n/aula_review آزمون شب\n/aula_off توقف";
+            "\n/aula_on فعال‌سازی\n/aula_now درس امروز\n/aula_next5 پنج صفحه بعد\n/aula_grammar گرامر\n/aula_speak مکالمه\n/aula_listen شنیداری\n/aula_progress پیشرفت\n/aula_review آزمون شب\n/aula_off توقف";
     }
     void tick(Sender sender){
         if(!p.getBoolean(ENABLED,false))return;
