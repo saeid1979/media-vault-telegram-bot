@@ -251,9 +251,9 @@ final class AulaPrivateLessons {
             int next=firstPage(lessonIndex()+1);
             if(next>LAST_PAGE)return "🎓 دوره کامل شده است.";
             p.edit().putInt(EXTRA,p.getInt(EXTRA,0)+5).apply();
-            return pageGuide(firstPage(lessonIndex()));
+            return morning(lessonIndex());
         }
-        if(cmd.equals("/aula_now"))return pageGuide(firstPage(lessonIndex()));
+        if(cmd.equals("/aula_now"))return morning(lessonIndex());
         if(cmd.equals("/aula_grammar")){
             String[] a=topic(firstPage(lessonIndex()));
             return "📘 گرامر: "+a[2]+"\nمثال: "+a[3]+"\nمعنی: "+a[4]+
