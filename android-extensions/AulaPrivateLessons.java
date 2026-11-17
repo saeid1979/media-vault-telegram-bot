@@ -18,7 +18,7 @@ final class AulaPrivateLessons {
     private static final String PM_SENT="aula_private_pm_sent";
     private static final String EXTRA="aula_extra_pages";
     private static final String RESTART_MARKER="aula_curriculum_version";
-    private static final int CURRICULUM_VERSION=377;
+    private static final int CURRICULUM_VERSION=378;
     private static final DateTimeFormatter CLOCK=DateTimeFormatter.ofPattern("HH:mm",Locale.ROOT);
     private final SharedPreferences p;
     AulaPrivateLessons(SharedPreferences p){this.p=p;resetOnCurriculumUpgrade();}
@@ -35,7 +35,7 @@ final class AulaPrivateLessons {
         String command=text.trim().split("\\s+")[0].split("@",2)[0].toLowerCase(Locale.ROOT);
         return command.equals("/aula")||command.equals("/aula_on")||
             command.equals("/aula_off")||command.equals("/aula_now")||
-            command.equals("/aula_review")||command.equals("/aula_status")||command.equals("/aula_next5")||command.equals("/aula_grammar")||command.equals("/aula_speak")||command.equals("/aula_listen")||command.equals("/aula_progress");
+            command.equals("/aula_review")||command.equals("/aula_status")||command.equals("/aula_next5")||command.equals("/aula_grammar")||command.equals("/aula_speak")||command.equals("/aula_listen")||command.equals("/aula_progress")||command.equals("/aula_page");
     }
     private static final String[] UNITS={
         "El español y tú|عادت‌های یادگیری زبان|desde hace / porque / para|Estudio español desde hace dos años.|دو سال است اسپانیایی می‌خوانم.|¿Por qué estudias español?",
@@ -131,6 +131,50 @@ final class AulaPrivateLessons {
                 "🔑 پاسخ نمونه: از مثال‌های حل‌شده برای مقایسه استفاده کن.";
         }}return null;
     }
+    // Original unit-aligned supplementary lessons; NOT a reproduction or page-by-page transcription.
+    private static final String[][] UNIT_EXAMPLES={
+{"Estudio español todos los días.","Aprendo palabras nuevas.","Quiero hablar con mis vecinos.","Necesito practicar la pronunciación.","Me gusta escuchar diálogos.","Me cuesta recordar algunos verbos.","Practico para hablar mejor.","Estudio porque vivo en España.","Desde hace meses leo en español.","En clase trabajo con compañeros."},
+{"Ayer visité el centro.","El lunes hablé con mi profesora.","Anoche cené con amigos.","El año pasado viajé a Madrid.","Compré un libro de español.","Empecé el curso en septiembre.","Llegué a casa a las ocho.","Después llamé a mi hermano.","El sábado fui al mercado.","Conocí a una persona interesante."},
+{"Mi hermana es simpática.","Mi amigo tiene mucha paciencia.","Soy una persona tranquila.","Mi compañero parece serio.","Mi padre lleva gafas.","Mi vecina es muy amable.","Tengo el pelo corto.","Mi amigo y yo nos parecemos.","Mi prima es más alta que yo.","A veces estoy nervioso."},
+{"Mi piso tiene dos habitaciones.","La cocina está al lado del salón.","La mesa está cerca de la ventana.","Mi habitación es luminosa.","El sofá es más cómodo que la silla.","Prefiero una casa tranquila.","El baño está a la derecha.","La cama está enfrente del armario.","Esta vivienda es menos cara.","Me gusta el balcón."},
+{"Estoy buscando una dirección.","¿Podrías ayudarme, por favor?","¿Te importa abrir la ventana?","Ahora estamos preparando la cena.","Perdona, ¿puedes repetirlo?","Lo siento, hoy no puedo.","¿Me dejas tu bolígrafo?","Muchas gracias por tu ayuda.","De nada, hasta luego.","¿Sería posible cambiar la hora?"},
+{"Esta semana he visitado un museo.","Todavía no he visto esa película.","Ya he comprado las entradas.","Hoy hemos paseado por el parque.","Mañana voy a ir al cine.","Quiero conocer la ciudad.","Pienso visitar una exposición.","Me ha gustado mucho la visita.","Nunca he probado esa actividad.","¿Has estado alguna vez allí?"},
+{"Suelo desayunar a las ocho.","Normalmente como en casa.","Me gusta preparar verduras.","No como carne todos los días.","A veces pido comida para llevar.","En España se cena bastante tarde.","Prefiero beber agua.","Los domingos cocinamos juntos.","¿Qué sueles comer al mediodía?","Hoy voy a preparar una ensalada."},
+{"Me duele la cabeza.","Me duelen los pies.","Hoy me encuentro mejor.","Tienes que descansar.","Bebe suficiente agua.","Duerme ocho horas si puedes.","Me siento cansado.","¿Qué te pasa?","Deberías hablar con un médico.","Necesito hacer una pausa."},
+{"Antes vivía en otra ciudad.","Cuando era niño jugaba en el parque.","Mi casa era más pequeña.","Todos los veranos viajábamos.","Antes trabajaba por la tarde.","De pequeño leía mucho.","Mi barrio tenía pocas tiendas.","Ahora vivo cerca del centro.","Antes no usaba el móvil.","En aquella época tenía más tiempo."},
+{"Ayer ocurrió algo especial.","Era tarde y hacía frío.","Cuando caminaba, empezó a llover.","De repente sonó el teléfono.","Primero salimos de casa.","Después cogimos el autobús.","Mientras esperaba, leí un libro.","Al final llegamos a tiempo.","Me puse muy contento.","Nunca olvidaré aquel día."}
+    };
+    private static final String[][] UNIT_TRANSLATIONS={
+{"هر روز اسپانیایی می‌خوانم.","واژه‌های جدید یاد می‌گیرم.","می‌خواهم با همسایه‌هایم صحبت کنم.","باید تلفظ را تمرین کنم.","دوست دارم مکالمه گوش کنم.","به خاطر سپردن بعضی فعل‌ها برایم سخت است.","تمرین می‌کنم تا بهتر صحبت کنم.","چون در اسپانیا زندگی می‌کنم درس می‌خوانم.","چند ماه است به اسپانیایی می‌خوانم.","در کلاس با همکلاسی‌ها کار می‌کنم."},
+{"دیروز از مرکز شهر دیدن کردم.","دوشنبه با معلمم صحبت کردم.","دیشب با دوستان شام خوردم.","سال گذشته به مادرید سفر کردم.","یک کتاب اسپانیایی خریدم.","دوره را در سپتامبر شروع کردم.","ساعت هشت به خانه رسیدم.","بعد به برادرم زنگ زدم.","شنبه به بازار رفتم.","با فرد جالبی آشنا شدم."},
+{"خواهرم خوش‌برخورد است.","دوستم خیلی صبور است.","آدم آرامی هستم.","همکارم جدی به نظر می‌رسد.","پدرم عینک می‌زند.","همسایه‌ام خیلی مهربان است.","موهای کوتاه دارم.","من و دوستم شبیه هم هستیم.","دخترخاله‌ام از من بلندتر است.","گاهی مضطربم."},
+{"خانه‌ام دو اتاق دارد.","آشپزخانه کنار پذیرایی است.","میز نزدیک پنجره است.","اتاقم نورگیر است.","مبل از صندلی راحت‌تر است.","خانه‌ای آرام را ترجیح می‌دهم.","حمام سمت راست است.","تخت روبه‌روی کمد است.","این خانه ارزان‌تر است.","بالکن را دوست دارم."},
+{"دنبال یک آدرس می‌گردم.","ممکن است لطفاً کمکم کنی؟","اشکالی دارد پنجره را باز کنی؟","الان داریم شام آماده می‌کنیم.","ببخشید، می‌توانی تکرار کنی؟","متأسفم، امروز نمی‌توانم.","خودکارت را به من قرض می‌دهی؟","از کمکت بسیار ممنونم.","خواهش می‌کنم، خداحافظ.","امکان تغییر ساعت هست؟"},
+{"این هفته از یک موزه بازدید کرده‌ام.","هنوز آن فیلم را ندیده‌ام.","بلیط‌ها را خریده‌ام.","امروز در پارک قدم زده‌ایم.","فردا می‌خواهم به سینما بروم.","می‌خواهم شهر را بشناسم.","قصد دارم از یک نمایشگاه بازدید کنم.","از بازدید خیلی خوشم آمده است.","هرگز آن فعالیت را امتحان نکرده‌ام.","تا حالا آنجا بوده‌ای؟"},
+{"معمولاً ساعت هشت صبحانه می‌خورم.","معمولاً در خانه ناهار می‌خورم.","دوست دارم سبزیجات آماده کنم.","هر روز گوشت نمی‌خورم.","گاهی غذای بیرون‌بر سفارش می‌دهم.","در اسپانیا نسبتاً دیر شام می‌خورند.","نوشیدن آب را ترجیح می‌دهم.","یکشنبه‌ها با هم آشپزی می‌کنیم.","معمولاً ظهر چه می‌خوری؟","امروز می‌خواهم سالاد درست کنم."},
+{"سرم درد می‌کند.","پاهایم درد می‌کنند.","امروز حالم بهتر است.","باید استراحت کنی.","آب کافی بنوش.","اگر می‌توانی هشت ساعت بخواب.","احساس خستگی می‌کنم.","چه شده است؟","بهتر است با پزشک صحبت کنی.","نیاز دارم کمی استراحت کنم."},
+{"قبلاً در شهر دیگری زندگی می‌کردم.","وقتی بچه بودم در پارک بازی می‌کردم.","خانه‌ام کوچک‌تر بود.","هر تابستان سفر می‌کردیم.","قبلاً عصرها کار می‌کردم.","در کودکی زیاد کتاب می‌خواندم.","محله‌ام مغازه‌های کمی داشت.","حالا نزدیک مرکز شهر زندگی می‌کنم.","قبلاً از موبایل استفاده نمی‌کردم.","آن زمان وقت بیشتری داشتم."},
+{"دیروز اتفاق خاصی افتاد.","دیر وقت بود و هوا سرد بود.","وقتی راه می‌رفتم باران شروع شد.","ناگهان تلفن زنگ زد.","اول از خانه بیرون رفتیم.","بعد سوار اتوبوس شدیم.","در حالی که منتظر بودم کتاب خواندم.","در نهایت به موقع رسیدیم.","خیلی خوشحال شدم.","آن روز را هرگز فراموش نمی‌کنم."}
+    };
+    private static final String[] PAGE_FOCUS={"هدف و انگیزه","زمان و مدت","گفت‌وگو و پرسش","توصیف و واژگان","کاربرد روزمره","ساخت جمله مثبت","ساخت جمله منفی","پرسش‌سازی","مکالمه کاربردی","تمرین زمان فعل","مقایسه دو جمله","اشتباه رایج","نوشتن و خواندن","مرور و جمع‌بندی"};
+    private static String expandedUnitPage(int page){
+        int u=unitIndex(page), offset=page-STARTS[u];
+        String[] topic=topic(page), samples=UNIT_EXAMPLES[u], fa=UNIT_TRANSLATIONS[u];
+        StringBuilder b=new StringBuilder("📖 صفحه "+page+" | "+topic[0]+"\n🎯 تمرکز تمرین تکمیلی: "+PAGE_FOCUS[Math.floorMod(offset,14)]);
+        b.append("\n📘 توضیح گرامری: ").append(NOTES[u]);
+        b.append("\n🧱 شش الگوی جمله‌سازی:\n");
+        String[] models=PATTERNS[u].split("\\|");
+        for(int k=0;k<6;k++){String ex=models[k%models.length];b.append(k+1).append(". ").append(ex).append("\n");}
+        b.append("\n✍️ ده مثال همراه ترجمه فارسی:\n");
+        for(int k=0;k<10;k++){int n=Math.floorMod(k+offset,10);b.append(k+1).append(". ").append(samples[n]).append("\n   🇮🇷 ").append(fa[n]).append("\n");}
+        b.append("\n🔍 سه مثال حل‌شده و تحلیل:\n");
+        for(int k=0;k<3;k++){int n=Math.floorMod(offset+k,10);b.append(k+1).append(") ").append(samples[n]).append(" = ").append(fa[n]).append("\n   نکته: ").append(NOTES[u]).append("\n");}
+        b.append("\n🗣️ گفت‌وگوی تألیفی:\nA: ").append(topic[5]).append("\nB: ").append(topic[3]).append("\n🇮🇷 ").append(topic[4]);
+        b.append("\n🧩 تمرین: ۱) دو جمله را منفی کن. ۲) با سه فعل جدید جمله بساز. ۳) یک پرسش و پاسخ بساز. ۴) پنج مثال را با صدای بلند بخوان.");
+        b.append("\n🔑 پاسخ نمونه: ").append(samples[Math.floorMod(offset,10)]).append(" | ").append(fa[Math.floorMod(offset,10)]);
+        b.append("\nℹ️ این درس تمرین تألیفی بر اساس موضوع واحد است؛ تطبیق دقیق با متن همین صفحه ادعا نمی‌شود.");
+        return b.toString();
+    }
     private static String pageGuide(int page){
         String rich=richPage(page);if(rich!=null)return rich;
         for(String[] entry:EXPANDED_GUIDES){if(Integer.parseInt(entry[0])==page)return "===درس صفحه "+page+"===\n📖 "+entry[1]+"\n"+entry[2];}
@@ -140,7 +184,7 @@ final class AulaPrivateLessons {
                 "\n✍️ مثال: "+example[0]+"\n🇮🇷 "+(example.length>1?example[1]:"")+
                 "\n🧩 تمرین اختصاصی: "+x[4]+"\n🗣️ مکالمه: پاسخ خود را در سه جمله اسپانیایی بگو.";
         }}
-        return null;
+        return expandedUnitPage(page);
     }
     String morning(int day){
         int from=firstPage(day);
@@ -198,13 +242,18 @@ final class AulaPrivateLessons {
             return "✅ آموزش خصوصی فعال شد. هر روز 08:30 درس و 22:00 مرور، به وقت Europe/Madrid.\n"+morning(day());
         }
         if(cmd.equals("/aula_off")){p.edit().putBoolean(ENABLED,false).apply();return "🔕 آموزش خصوصی متوقف شد.";}
+        if(cmd.equals("/aula_page")){
+            String[] bits=text.trim().split("\\s+");
+            if(bits.length<2)return "شماره صفحه را وارد کن: /aula_page 15";
+            try {int page=Integer.parseInt(bits[1]);return page>=10&&page<=149?pageGuide(page):"صفحه باید بین ۱۰ تا ۱۴۹ باشد.";}catch(Exception ex){return "شماره صفحه معتبر نیست.";}
+        }
         if(cmd.equals("/aula_next5")){
             int next=firstPage(lessonIndex()+1);
             if(next>LAST_PAGE)return "🎓 دوره کامل شده است.";
             p.edit().putInt(EXTRA,p.getInt(EXTRA,0)+5).apply();
-            return morning(lessonIndex());
+            return pageGuide(firstPage(lessonIndex()));
         }
-        if(cmd.equals("/aula_now"))return morning(lessonIndex());
+        if(cmd.equals("/aula_now"))return pageGuide(firstPage(lessonIndex()));
         if(cmd.equals("/aula_grammar")){
             String[] a=topic(firstPage(lessonIndex()));
             return "📘 گرامر: "+a[2]+"\nمثال: "+a[3]+"\nمعنی: "+a[4]+
@@ -237,8 +286,11 @@ final class AulaPrivateLessons {
         LocalTime now=LocalTime.now(zone);
         String date=today.toString();
         if(!now.isBefore(LocalTime.parse("08:30",CLOCK)) && !date.equals(p.getString(AM_SENT,""))){
-            try {sender.send(owner,morning(day()));p.edit().putString(AM_SENT,date).apply();}
-            catch(Exception ignored){return;}
+            try {
+                int from=firstPage(day());
+                if(from<=LAST_PAGE){for(int page=from;page<=Math.min(from+4,LAST_PAGE);page++)sender.send(owner,pageGuide(page));}
+                p.edit().putString(AM_SENT,date).apply();
+            }catch(Exception ignored){return;}
         }
         if(!now.isBefore(LocalTime.parse("22:00",CLOCK)) && !date.equals(p.getString(PM_SENT,""))){
             try {sender.send(owner,evening(day()));p.edit().putString(PM_SENT,date).apply();}
